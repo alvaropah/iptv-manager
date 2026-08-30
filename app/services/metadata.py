@@ -9,6 +9,7 @@ YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2})\b")
 COUNTRY_SUFFIX_RE = re.compile(r"\s*\(([A-Z]{2})\)\s*$", re.I)
 PROVIDER_PREFIX_RE = re.compile(r"^(?:4k|8k|uhd|fhd|hd|amz|amazon|netflix|disney\+?|disney|apple\+?|apple|hbo|max|paramount\+?|sky|osn\+?|peacock|showtime|prime\+?|prime|crunchyroll|discovery\+?|discovery|vix(?:\s+premium)?|movistar|atresplayer|rtve|starz|hulu|viaplay|filmin|rakuten|nickelodeon|marvel)\s*[-_:|]\s*", re.I)
 INSTALLMENT_RE = re.compile(r"\b(?:vol(?:ume)?\.?\s*\d+|part\s*\d+|pt\.?\s*\d+|chapter\s*\d+|special\s*\d+|season\s*\d+|series\s*\d+)\b", re.I)
+EPISODE_MARKER_RE = re.compile(r"(?:^|\s)[-–—|_: ]*S\d{1,3}E\d{1,4}(?:\s.*)?$", re.I)
 
 
 def normalize_title(value: str) -> str:
@@ -49,6 +50,9 @@ def extract_country(title: str) -> str | None:
 
 def _clean_search_title(value: str) -> str:
     value = clean_provider_title(value)
+    # Episode records often contain the series title plus SxxExx and an
+    # episode title. Those markers must never leak into a series lookup.
+    value = EPISODE_MARKER_RE.sub(" ", value)
     value = COUNTRY_SUFFIX_RE.sub("", value).strip()
     value = YEAR_RE.sub(" ", value)
     value = re.sub(r"\(\s*\)|\[\s*\]", " ", value)
@@ -129,8 +133,6 @@ def _title_head_match(provider: str, candidate: str) -> bool:
     """True when the provider title is the complete title head of a longer TMDB title."""
     if not provider or not candidate:
         return False
-    # One-word titles need enough entropy to avoid turning generic words into
-    # automatic matches (e.g. "One", "The", "Home").
     provider_tokens = provider.split()
     if len(provider_tokens) == 1 and len(provider_tokens[0]) < 4:
         return False
@@ -147,13 +149,8 @@ def score_candidate(provider_title: str, provider_year: int | None, candidate: d
     clean_norm = normalize_title(clean)
     exact_clean_title = bool(clean_norm and any(name == clean_norm for name in normalized))
     if exact_clean_title:
-        # Provider suffixes such as (2022) and (PT) describe the provider
-        # catalogue entry; they must not make an otherwise exact title fail.
         best = max(best, 0.96)
     if any(_title_head_match(clean_norm, name) for name in normalized):
-        # Some databases expand a short/base title in the canonical TMDB name,
-        # e.g. provider "Arpo" -> TMDB "ARPO: Robot Babysitter".
-        # Treat that as a strong identity signal without requiring exact text.
         best = max(best, 0.91)
     if any(_marker_conflict(provider_title, name) for name in names):
         best = min(best, 0.35)
@@ -165,9 +162,6 @@ def score_candidate(provider_title: str, provider_year: int | None, candidate: d
             best = max(0.0, best - 0.10)
     if provider_country:
         countries = _candidate_countries(candidate)
-        # Country suffixes in provider names are catalogue/territory hints,
-        # not hard production-country constraints. A mismatch is therefore
-        # never penalized; a confirmed match is only a small positive signal.
         if provider_country.upper() in countries:
             best = min(1.0, best + 0.04)
     return round(best, 4)
