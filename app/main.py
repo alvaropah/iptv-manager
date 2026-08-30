@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db.database import init_db
@@ -15,13 +16,18 @@ from app.db.repository import (
 from app.core.config import settings
 
 
-APP_VERSION = "0.4.1"
+APP_VERSION = "0.4.2"
 
 app = FastAPI(
     title="IPTV Manager API",
     version=APP_VERSION,
     description="API de catálogo para IPTV Manager. Lee la BD local y no consulta Xtream para servir el catálogo.",
 )
+
+# Primera interfaz web. Consume exclusivamente la API local.
+WEB_DIR = __import__("pathlib").Path(__file__).resolve().parent / "web"
+if WEB_DIR.exists():
+    app.mount("/ui", StaticFiles(directory=str(WEB_DIR), html=True), name="ui")
 
 # Preparado para el futuro frontend. En desarrollo permitimos localhost.
 app.add_middleware(
