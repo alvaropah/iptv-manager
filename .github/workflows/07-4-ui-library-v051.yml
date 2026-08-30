@@ -1,0 +1,109 @@
+name: 07.4 - Biblioteca UI v0.5.1
+run-name: Biblioteca UI v0.5.1
+
+on: [workflow_dispatch]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  ui-library:
+    name: Biblioteca UI sobre catálogo real
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Restaurar BD persistente compatible
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf data candidates
+          mkdir -p data candidates
+
+          validate_db() {
+            DB="$1" python - <<'PY'
+          import os, sqlite3, sys
+          db = os.environ["DB"]
+          required = {
+              "providers", "categories", "content", "seasons", "episodes",
+              "versions", "streams", "content_categories", "stream_categories",
+              "series_sources", "sync_runs", "change_events", "sync_state",
+          }
+          try:
+              with sqlite3.connect(db) as con:
+                  integrity = con.execute("PRAGMA integrity_check").fetchone()[0]
+                  tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+          except Exception as exc:
+              print(f"Error validando SQLite: {exc}")
+              sys.exit(1)
+          missing = required - tables
+          print("integrity_check:", integrity)
+          print("tablas requeridas:", len(required))
+          print("tablas presentes:", len(required - missing))
+          if integrity != "ok" or missing:
+              if missing:
+                  print("faltan:", ", ".join(sorted(missing)))
+              sys.exit(1)
+          PY
+          }
+
+          find_db() {
+            find candidates -type f \( -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \) -print -quit
+          }
+
+          try_artifact() {
+            local run_id="$1"
+            local artifact="$2"
+            rm -rf candidates/*
+            echo "Probando run $run_id / artifact $artifact"
+            if ! gh run download "$run_id" --name "$artifact" --dir candidates; then
+              return 1
+            fi
+            local db
+            db="$(find_db || true)"
+            [ -n "$db" ] || return 1
+            if validate_db "$db"; then
+              cp "$db" data/iptv_manager.db
+              echo "BD aceptada: $(du -h data/iptv_manager.db | cut -f1)"
+              return 0
+            fi
+            return 1
+          }
+
+          FOUND=0
+          mapfile -t RUNS < <(gh run list --workflow 03-1-sync-persistent.yml --status success --limit 10 --json databaseId --jq '.[].databaseId')
+          for RUN in "${RUNS[@]}"; do
+            [ -n "$RUN" ] || continue
+            if try_artifact "$RUN" "iptv-manager-v031-catalog"; then FOUND=1; break; fi
+          done
+
+          if [ "$FOUND" -ne 1 ]; then
+            echo "No se encontró v0.3.1; probando v0.3..."
+            mapfile -t RUNS < <(gh run list --workflow 06-sync-catalog-v03.yml --status success --limit 10 --json databaseId --jq '.[].databaseId')
+            for RUN in "${RUNS[@]}"; do
+              [ -n "$RUN" ] || continue
+              if try_artifact "$RUN" "iptv-manager-v03-catalog"; then FOUND=1; break; fi
+            done
+          fi
+
+          [ "$FOUND" -eq 1 ] || { echo "ERROR: no se encontró un catálogo persistente compatible."; exit 1; }
+          rm -rf candidates
+
+      - name: Validar Biblioteca UI contra catálogo real
+        env:
+          DATABASE_PATH: data/iptv_manager.db
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/test_ui_v051.py
