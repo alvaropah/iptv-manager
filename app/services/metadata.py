@@ -125,6 +125,18 @@ def _candidate_countries(candidate: dict) -> set[str]:
     return out
 
 
+def _title_head_match(provider: str, candidate: str) -> bool:
+    """True when the provider title is the complete title head of a longer TMDB title."""
+    if not provider or not candidate:
+        return False
+    # One-word titles need enough entropy to avoid turning generic words into
+    # automatic matches (e.g. "One", "The", "Home").
+    provider_tokens = provider.split()
+    if len(provider_tokens) == 1 and len(provider_tokens[0]) < 4:
+        return False
+    return candidate.startswith(provider + " ") or candidate.startswith(provider + ":") or candidate.startswith(provider + "-")
+
+
 def score_candidate(provider_title: str, provider_year: int | None, candidate: dict, provider_country: str | None = None) -> float:
     clean = _clean_search_title(provider_title)
     raw = YEAR_RE.sub(" ", provider_title or "")
@@ -138,6 +150,11 @@ def score_candidate(provider_title: str, provider_year: int | None, candidate: d
         # Provider suffixes such as (2022) and (PT) describe the provider
         # catalogue entry; they must not make an otherwise exact title fail.
         best = max(best, 0.96)
+    if any(_title_head_match(clean_norm, name) for name in normalized):
+        # Some databases expand a short/base title in the canonical TMDB name,
+        # e.g. provider "Arpo" -> TMDB "ARPO: Robot Babysitter".
+        # Treat that as a strong identity signal without requiring exact text.
+        best = max(best, 0.91)
     if any(_marker_conflict(provider_title, name) for name in names):
         best = min(best, 0.35)
     date = (candidate.get("release_date") or candidate.get("first_air_date") or "")[:4]
