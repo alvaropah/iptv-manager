@@ -37,7 +37,7 @@ def save_metadata(conn, row, result, score, status):
     conn.execute("""INSERT INTO metadata_links(content_id,provider_title,external_source,external_id,match_status,match_score,matched_by,updated_at)
       VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
       ON CONFLICT(content_id,external_source) DO UPDATE SET provider_title=excluded.provider_title,external_id=excluded.external_id,match_status=excluded.match_status,match_score=excluded.match_score,matched_by=excluded.matched_by,updated_at=CURRENT_TIMESTAMP""",
-      (row["id"], row["canonical_title"], "tmdb", tmdb_id, status, score, "clean_title+year+multilang+alternative_titles"))
+      (row["id"], row["canonical_title"], "tmdb", tmdb_id, status, score, "clean_title+year+multilang+alternative_titles+evidence"))
     if status != "matched":
         return
     runtime = result.get("runtime") if is_movie else ((result.get("episode_run_time") or [None])[0])
@@ -48,7 +48,6 @@ def save_metadata(conn, row, result, score, status):
 
 
 def search_candidates(client: TMDBClient, content_type: str, query: str, year: int | None) -> list[dict]:
-    """Search all relevant languages and year modes, merging candidates by TMDB id."""
     search = client.search_movie if content_type == "movie" else client.search_tv
     merged: dict[int, dict] = {}
     languages = []
@@ -73,13 +72,15 @@ def rank_candidates(client: TMDBClient, content_type: str, provider_title: str, 
     ranked = []
     for candidate in candidates:
         score = score_candidate(provider_title, year, candidate)
+        # For weak candidates, inspect TMDB alternative titles. A translated or
+        # transliterated title can otherwise look unrelated to the provider title.
         if score < 0.86:
             try:
                 alternatives = client.alternative_titles(candidate["id"], content_type)
                 candidate = {**candidate, "alternative_titles": alternatives}
                 score = score_candidate(provider_title, year, candidate)
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"    alternative title warning | id={candidate.get('id')} | {exc}")
         ranked.append((score, candidate))
     return sorted(ranked, key=lambda x: x[0], reverse=True)
 
