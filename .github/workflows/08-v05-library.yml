@@ -1,0 +1,49 @@
+name: 08 - Biblioteca IPTV v0.5
+run-name: Biblioteca IPTV v0.5
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  library-real:
+    name: API + biblioteca sobre catálogo real
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Restaurar BD persistente
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf data candidates
+          mkdir -p data candidates
+          echo "Restaurando artifact persistente v0.3.1..."
+          gh run download 33318265975 --name iptv-manager-v031-catalog --dir candidates
+          DB="$(find candidates -type f \( -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \) -print -quit)"
+          test -n "$DB"
+          cp "$DB" data/iptv_manager.db
+          echo "BD restaurada: $(du -h data/iptv_manager.db | cut -f1)"
+          python -c "import sqlite3; c=sqlite3.connect('data/iptv_manager.db'); print('integrity_check:', c.execute('PRAGMA integrity_check').fetchone()[0]); required={'providers','categories','content','seasons','episodes','versions','streams','content_categories','stream_categories','series_sources','sync_runs','change_events','sync_state'}; tables={r[0] for r in c.execute(\"SELECT name FROM sqlite_master WHERE type='table'\")}; missing=required-tables; print('tablas requeridas:', len(required)); print('tablas presentes:', len(required-missing)); assert not missing and c.execute('PRAGMA integrity_check').fetchone()[0]=='ok'"
+
+      - name: Validar biblioteca v0.5
+        env:
+          DATABASE_PATH: data/iptv_manager.db
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/test_v05_library.py
