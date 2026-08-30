@@ -76,7 +76,7 @@ def search_candidates(client: TMDBClient, content_type: str, query: str, year: i
     return list(merged.values())
 
 
-def rank_candidates(client: TMDBClient, content_type: str, provider_title: str, year: int | None, candidates: list[dict]):
+def rank_candidates(client: TMDBClient, content_type: str, provider_title: str, year: int | None, candidates: list[dict], diagnostic: bool = False):
     ranked = []
     for candidate in candidates:
         score = score_candidate(provider_title, year, candidate)
@@ -87,6 +87,10 @@ def rank_candidates(client: TMDBClient, content_type: str, provider_title: str, 
                 score = score_candidate(provider_title, year, candidate)
             except Exception as exc:
                 print(f"    alternative title warning | id={candidate.get('id')} | {exc}")
+        if diagnostic:
+            names = [candidate.get(k) for k in ("title", "name", "original_title", "original_name") if candidate.get(k)]
+            names += list(candidate.get("_locale_variants") or [])
+            print(f"    CANDIDATE | id={candidate.get('id')} | score={score:.2f} | titles={names}")
         ranked.append((score, candidate))
     return sorted(ranked, key=lambda x: x[0], reverse=True)
 
@@ -95,6 +99,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--type", choices=["movie", "series"], default=None)
+    parser.add_argument("--diagnostic", action="store_true")
     args = parser.parse_args()
     token = settings.tmdb_api_token or os.getenv("TMDB_API_TOKEN", "")
     if not token:
@@ -123,7 +128,7 @@ def main():
                     no_candidates += 1
                     print(f"[{index}/{len(rows)}] NO MATCH | proveedor={row['canonical_title']} | consulta={query_used}")
                     continue
-                ranked = rank_candidates(client, row["content_type"], row["canonical_title"], year, all_candidates)
+                ranked = rank_candidates(client, row["content_type"], row["canonical_title"], year, all_candidates, args.diagnostic)
                 score, candidate = ranked[0]
                 status = classify_match(score)
                 detail = client.movie(candidate["id"]) if row["content_type"] == "movie" else client.tv(candidate["id"])
