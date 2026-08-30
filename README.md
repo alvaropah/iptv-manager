@@ -1,4 +1,4 @@
-# IPTV Manager — v0.4.0
+# IPTV Manager — v0.4.3
 
 Primera base de API del producto.
 
@@ -11,7 +11,7 @@ La API sirve el catálogo desde la BD y no consulta Xtream al navegar.
 ## Incluye
 
 - Capa Repository para aislar el acceso a la BD.
-- FastAPI 0.4.0.
+- FastAPI 0.4.3.
 - Health check.
 - Estadísticas.
 - Categorías seleccionadas.

@@ -16,7 +16,7 @@ from app.db.repository import (
 from app.core.config import settings
 
 
-APP_VERSION = "0.4.2"
+APP_VERSION = "0.4.3"
 
 app = FastAPI(
     title="IPTV Manager API",
