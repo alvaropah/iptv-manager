@@ -18,17 +18,10 @@ class CategoryProfile:
 def _fold(value: str) -> str:
     value = unicodedata.normalize("NFKC", value or "")
     value = value.casefold()
-    value = re.sub(r"\s+", " ", value).strip()
-    return value
+    return re.sub(r"\s+", " ", value).strip()
 
 
 def infer_category_profile(category_name: str) -> CategoryProfile:
-    """
-    Conservative interpretation of category metadata.
-
-    Only signals explicitly present in the category name are inferred.
-    The original category name remains authoritative provenance.
-    """
     n = _fold(category_name)
 
     quality = None
@@ -38,38 +31,31 @@ def infer_category_profile(category_name: str) -> CategoryProfile:
     subtitles = None
     language_hint = None
 
-    if re.search(r"\b8k\b|⁸ᴷ", n):
-        quality = "8K"
-        resolution = "4320p"
-    elif re.search(r"\b4k\b|3840p|⁴ᴷ|³⁸⁴⁰ᴾ", n):
-        quality = "4K"
-        resolution = "2160p"
-    elif re.search(r"\b2k\b", n):
-        quality = "2K"
+    if re.search(r"\b8k\b", n):
+        quality, resolution = "8K", "4320p"
+    elif re.search(r"\b4k\b|3840p", n):
+        quality, resolution = "4K", "2160p"
     elif re.search(r"\b1080p\b|\bfhd\b|\bfull hd\b", n):
-        quality = "1080p"
-        resolution = "1080p"
+        quality, resolution = "1080p", "1080p"
     elif re.search(r"\b720p\b|\bhd\b", n):
-        quality = "720p"
-        resolution = "720p"
+        quality, resolution = "720p", "720p"
 
-    if "dolby vision" in n or "dolby ⱽᶦˢᶦᵒⁿ" in n or "ᴴᴰᴿ" in category_name:
+    if "dolby vision" in n:
         dynamic_range = "Dolby Vision"
-    elif re.search(r"\bhdr\b|ᴴᴰᴿ", n):
+    elif re.search(r"\bhdr\b", n):
         dynamic_range = "HDR"
 
-    if "dolby audio" in n or "ᴰᴼᴸᴮʸ ᴬᵁᴰᴵᴼ" in category_name:
+    if "dolby audio" in n:
         audio = "Dolby Audio"
 
     if "subtitles" in n or "subtitle" in n or "subtitled" in n:
         subtitles = True
 
-    # Language is deliberately only a hint when the category name is explicit.
-    if re.search(r"\bespaña\b|\bes\b(?:-|$)", n):
+    if re.search(r"\bespaña\b|\bes(?:-|$)", n):
         language_hint = "es"
-    elif re.search(r"\benglish\b|\beng\b", n):
+    elif re.search(r"\benglish\b|\beng(?:-|$)", n):
         language_hint = "en"
-    elif re.search(r"\bfrançais\b|\bfrench\b|\bfra\b", n):
+    elif re.search(r"\bfrench\b|\bfrançais\b|\bfra(?:-|$)", n):
         language_hint = "fr"
 
     return CategoryProfile(

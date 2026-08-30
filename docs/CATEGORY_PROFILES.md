@@ -1,10 +1,9 @@
 # Perfiles de categorías — Paso 4
 
-Las categorías seleccionadas en `config.yml` son una fuente de metadata para
-interpretar las versiones del contenido.
+Esta prueba interpreta únicamente las 119 categorías seleccionadas en
+`config.yml`.
 
-El sistema conserva siempre el nombre original del proveedor. El perfil es una
-inferencia auxiliar, no una sustitución.
+No consulta Xtream y no descarga catálogo.
 
 ## Señales
 
@@ -18,20 +17,8 @@ inferencia auxiliar, no una sustitución.
 - Subtitles / Subtitle → subtítulos
 - España → `es` como pista de idioma
 
-## Regla de seguridad
+Los campos desconocidos quedan en `NULL`.
 
-Si una categoría no contiene una señal explícita, el campo queda `NULL`.
-
-No se debe asumir que una categoría "España" significa que todos los streams
-tienen audio español. Por eso el idioma se guarda como `language_hint` hasta
-que una fuente más fiable lo confirme.
-
-En el futuro, estas señales se combinarán con:
-
-1. nombre original del stream/episodio;
-2. metadatos de Xtream;
-3. metadata externa, si se incorpora;
-4. reglas de confianza.
-
-Así podremos distinguir, por ejemplo, un episodio idéntico en nombre pero
-procedente de categorías 1080p y 4K.
+La categoría original del proveedor se conservará posteriormente como
+procedencia. Estas inferencias serán una señal adicional, no un sustituto
+del nombre original ni de otros metadatos.

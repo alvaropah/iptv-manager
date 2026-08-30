@@ -12,31 +12,45 @@ def show(section: str, categories: list[str]) -> None:
     print("=" * 72)
 
     counters = Counter()
+
     for name in categories:
-        p = infer_category_profile(name)
+        profile = infer_category_profile(name)
         signals = []
+
         for label, value in (
-            ("quality", p.quality),
-            ("resolution", p.resolution),
-            ("dynamic_range", p.dynamic_range),
-            ("audio", p.audio),
-            ("subtitles", p.subtitles),
-            ("language_hint", p.language_hint),
+            ("quality", profile.quality),
+            ("resolution", profile.resolution),
+            ("dynamic_range", profile.dynamic_range),
+            ("audio", profile.audio),
+            ("subtitles", profile.subtitles),
+            ("language_hint", profile.language_hint),
         ):
             if value is not None:
                 signals.append(f"{label}={value}")
                 counters[label] += 1
 
-        print(f"{name}")
-        print("  " + (", ".join(signals) if signals else "sin señales técnicas explícitas"))
+        print(name)
+        print(
+            "  " +
+            (", ".join(signals) if signals
+             else "sin señales técnicas explícitas")
+        )
 
     print("\nRESUMEN")
-    for key in ("quality", "resolution", "dynamic_range", "audio", "subtitles", "language_hint"):
+    for key in (
+        "quality",
+        "resolution",
+        "dynamic_range",
+        "audio",
+        "subtitles",
+        "language_hint",
+    ):
         print(f"  {key}: {counters[key]} categorías")
 
 
 def main() -> int:
     cfg = load_catalog_selection()
+
     print("IPTV MANAGER — PRUEBA 4: INTERPRETACIÓN DE CATEGORÍAS")
     print("=" * 72)
     print(f"Series configuradas: {len(cfg.series_categories)}")
