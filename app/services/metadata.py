@@ -133,22 +133,26 @@ def score_candidate(provider_title: str, provider_year: int | None, candidate: d
     normalized = [normalize_title(x) for x in names]
     best = max((_title_similarity(target, name) for target in targets for name in normalized), default=0.0)
     clean_norm = normalize_title(clean)
-    if clean_norm and any(name == clean_norm for name in normalized):
-        best = max(best, 0.94)
+    exact_clean_title = bool(clean_norm and any(name == clean_norm for name in normalized))
+    if exact_clean_title:
+        # Provider suffixes such as (2022) and (PT) describe the provider
+        # catalogue entry; they must not make an otherwise exact title fail.
+        best = max(best, 0.96)
     if any(_marker_conflict(provider_title, name) for name in names):
         best = min(best, 0.35)
     date = (candidate.get("release_date") or candidate.get("first_air_date") or "")[:4]
     if provider_year and date.isdigit():
         if int(date) == provider_year:
             best = min(1.0, best + 0.18)
-        elif best < 0.90:
+        elif not exact_clean_title and best < 0.90:
             best = max(0.0, best - 0.10)
     if provider_country:
         countries = _candidate_countries(candidate)
+        # Country suffixes in provider names are catalogue/territory hints,
+        # not hard production-country constraints. A mismatch is therefore
+        # never penalized; a confirmed match is only a small positive signal.
         if provider_country.upper() in countries:
-            best = min(1.0, best + 0.08)
-        elif countries and best < 0.90:
-            best = max(0.0, best - 0.04)
+            best = min(1.0, best + 0.04)
     return round(best, 4)
 
 
