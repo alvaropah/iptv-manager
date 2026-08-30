@@ -21,6 +21,7 @@ jobs:
 
       - name: Probar conexión y categorías
         env:
+          PYTHONPATH: ${{ github.workspace }}
           XTREAM_HOST: ${{ secrets.XTREAM_HOST }}
           XTREAM_USERNAME: ${{ secrets.XTREAM_USERNAME }}
           XTREAM_PASSWORD: ${{ secrets.XTREAM_PASSWORD }}
