@@ -9,7 +9,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.db.metadata import init_metadata_db
-from app.db.repository import get_episode, get_series_seasons
 from app.services.metadata import classify_match, score_candidate
 
 
@@ -23,6 +22,19 @@ def test_provider_suffix_matching():
     }
     score = score_candidate('AMZ - Arpo (2022) (PT)', 2022, candidate, 'PT')
     assert score >= 0.96, score
+    assert classify_match(score) == 'matched'
+
+
+def test_expanded_tmdb_title_matching():
+    candidate = {
+        'id': 478009,
+        'name': 'ARPO: Robot Babysitter',
+        'original_name': 'ARPO: Robot Babysitter',
+        'first_air_date': '2021-11-01',
+        'origin_country': ['US'],
+    }
+    score = score_candidate('AMZ - Arpo (2022) (PT)', 2022, candidate, 'PT')
+    assert score >= 0.90, score
     assert classify_match(score) == 'matched'
 
 
@@ -56,16 +68,15 @@ def main():
     INSERT INTO streams VALUES (1,1,'source','https://example.test/ep.m3u8','m3u8','Provider Episode',1);
     INSERT INTO episode_metadata VALUES (100,'tmdb','999','Título del episodio','Sinopsis TMDB','2024-01-01',45,'https://image.tmdb.org/t/p/w780/still.jpg','{}','es-ES',CURRENT_TIMESTAMP);
     """)
-    # repository uses the application's database connection, so this test
-    # validates schema/contract separately rather than coupling to a file DB.
     row = conn.execute("SELECT title,overview,still_url,runtime FROM episode_metadata WHERE episode_id=100").fetchone()
     assert row[0] == 'Título del episodio'
     assert row[1] == 'Sinopsis TMDB'
     assert row[2].endswith('/still.jpg')
     assert row[3] == 45
     test_provider_suffix_matching()
+    test_expanded_tmdb_title_matching()
     test_wrong_installment_still_rejected()
-    print('OK | episode_metadata contract | provider suffix matching')
+    print('OK | episode_metadata contract | title suffix/head matching')
 
 
 if __name__ == '__main__':
