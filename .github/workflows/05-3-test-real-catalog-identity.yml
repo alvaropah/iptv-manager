@@ -1,0 +1,19 @@
+name: "05.3 - Identidad sobre catálogo real"
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Ejecutar prueba 5.3
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          XTREAM_HOST: ${{ secrets.XTREAM_HOST }}
+          XTREAM_USERNAME: ${{ secrets.XTREAM_USERNAME }}
+          XTREAM_PASSWORD: ${{ secrets.XTREAM_PASSWORD }}
+        run: python scripts/test_catalog_identity_real.py
