@@ -81,34 +81,25 @@ def _metadata_links_needs_rebuild(conn: sqlite3.Connection) -> bool:
     rows = conn.execute("PRAGMA table_info(metadata_links)").fetchall()
     if not rows:
         return False
-
     columns = {row[1] for row in rows}
     if "episode_id" not in columns:
         return True
-
     unique_pairs: set[tuple[str, ...]] = set()
     for idx in conn.execute("PRAGMA index_list(metadata_links)").fetchall():
         if not idx[2] or not idx[3]:
             continue
         info = conn.execute(f'PRAGMA index_info("{idx[1]}")').fetchall()
-        names = tuple(row[2] for row in info)
-        unique_pairs.add(names)
-
-    return (
-        ("content_id", "external_source") not in unique_pairs
-        or ("episode_id", "external_source") not in unique_pairs
-    )
+        unique_pairs.add(tuple(row[2] for row in info))
+    return (("content_id", "external_source") not in unique_pairs
+            or ("episode_id", "external_source") not in unique_pairs)
 
 
 def _ensure_metadata_links_schema(conn: sqlite3.Connection) -> None:
-    """Upgrade any pre-episode metadata_links schema to the canonical model."""
     if not _metadata_links_needs_rebuild(conn):
         return
-
     rows = conn.execute("PRAGMA table_info(metadata_links)").fetchall()
     if not rows:
         return
-
     legacy_columns = {row[1] for row in rows}
     conn.execute("PRAGMA foreign_keys=OFF")
     conn.execute("ALTER TABLE metadata_links RENAME TO metadata_links_legacy")
@@ -135,31 +126,71 @@ def _ensure_metadata_links_schema(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_metadata_links_status ON metadata_links(match_status)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_metadata_links_external ON metadata_links(external_source, external_id)")
 
-    def value_or_default(column: str, default: str) -> str:
-        return column if column in legacy_columns else default
-
-    content_expr = value_or_default("content_id", "NULL")
-    episode_expr = value_or_default("episode_id", "NULL")
-    provider_expr = value_or_default("provider_title", "NULL")
-    created_expr = value_or_default("created_at", "CURRENT_TIMESTAMP")
-    updated_expr = value_or_default("updated_at", "CURRENT_TIMESTAMP")
-    status_expr = value_or_default("match_status", "'matched'")
-    score_expr = value_or_default("match_score", "NULL")
-    matched_by_expr = value_or_default("matched_by", "NULL")
+    def col(name: str, default: str) -> str:
+        return name if name in legacy_columns else default
 
     conn.execute(f"""INSERT OR IGNORE INTO metadata_links
         (id, content_id, episode_id, provider_title, external_source, external_id,
          match_status, match_score, matched_by, created_at, updated_at)
-        SELECT id, {content_expr}, {episode_expr}, {provider_expr}, external_source, external_id,
-               {status_expr}, {score_expr}, {matched_by_expr}, {created_expr}, {updated_expr}
+        SELECT id, {col('content_id','NULL')}, {col('episode_id','NULL')}, {col('provider_title','NULL')},
+               external_source, external_id, {col('match_status',"'matched'")}, {col('match_score','NULL')},
+               {col('matched_by','NULL')}, {col('created_at','CURRENT_TIMESTAMP')}, {col('updated_at','CURRENT_TIMESTAMP')}
         FROM metadata_links_legacy
         WHERE external_source IS NOT NULL AND external_id IS NOT NULL""")
     conn.execute("DROP TABLE metadata_links_legacy")
     conn.execute("PRAGMA foreign_keys=ON")
 
 
+def _episode_metadata_needs_rebuild(conn: sqlite3.Connection) -> bool:
+    rows = conn.execute("PRAGMA table_info(episode_metadata)").fetchall()
+    if not rows:
+        return False
+    # episode_id must be the actual SQLite PRIMARY KEY because the enrichment
+    # script uses ON CONFLICT(episode_id). Older restored catalogs may have the
+    # column but not the constraint.
+    episode_pk = any(row[1] == "episode_id" and row[5] == 1 for row in rows)
+    required = {"episode_id", "source", "external_id", "title", "overview", "air_date",
+                "runtime", "still_url", "raw_json", "language", "updated_at"}
+    return not episode_pk or not required.issubset({row[1] for row in rows})
+
+
+def _ensure_episode_metadata_schema(conn: sqlite3.Connection) -> None:
+    if not _episode_metadata_needs_rebuild(conn):
+        return
+    rows = conn.execute("PRAGMA table_info(episode_metadata)").fetchall()
+    if not rows:
+        return
+    legacy = {row[1] for row in rows}
+    conn.execute("PRAGMA foreign_keys=OFF")
+    conn.execute("ALTER TABLE episode_metadata RENAME TO episode_metadata_legacy")
+    conn.execute("""CREATE TABLE episode_metadata (
+        episode_id INTEGER PRIMARY KEY,
+        source TEXT NOT NULL,
+        external_id TEXT NOT NULL,
+        title TEXT,
+        overview TEXT,
+        air_date TEXT,
+        runtime INTEGER,
+        still_url TEXT,
+        raw_json TEXT,
+        language TEXT,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(episode_id) REFERENCES episodes(id) ON DELETE CASCADE
+    )""")
+    cols = [name for name in (
+        "episode_id", "source", "external_id", "title", "overview", "air_date",
+        "runtime", "still_url", "raw_json", "language", "updated_at"
+    ) if name in legacy]
+    if "episode_id" in cols and "source" in cols and "external_id" in cols:
+        names = ",".join(cols)
+        conn.execute(f"INSERT OR IGNORE INTO episode_metadata ({names}) SELECT {names} FROM episode_metadata_legacy")
+    conn.execute("DROP TABLE episode_metadata_legacy")
+    conn.execute("PRAGMA foreign_keys=ON")
+
+
 def init_metadata_db(conn: sqlite3.Connection) -> None:
     _ensure_metadata_links_schema(conn)
+    _ensure_episode_metadata_schema(conn)
     conn.executescript(METADATA_SCHEMA)
 
 
