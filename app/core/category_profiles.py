@@ -18,6 +18,10 @@ class CategoryProfile:
 def _fold(value: str) -> str:
     """Normalize provider's normal and Unicode-styled lettering."""
     value = unicodedata.normalize("NFKD", value or "")
+    # Remove combining marks so ñ/á/é/etc. are matched consistently.
+    value = "".join(
+        ch for ch in value if unicodedata.category(ch) != "Mn"
+    )
     # Some provider category names use modifier/phonetic Unicode letters
     # that NFKD leaves behind (e.g. ɪ in stylized Dolby Vision).
     value = value.translate(str.maketrans({
@@ -80,7 +84,7 @@ def infer_category_profile(category_name: str) -> CategoryProfile:
     if re.search(r"\bsubtitles?\b|\bsubtitled\b|\bsubs\b", n):
         subtitles = True
 
-    if re.search(r"^es\s*[-–—]", n) or re.search(r"\bespaña\b", n):
+    if re.search(r"^es\s*[-–—]", n) or re.search(r"\bespana\b", n):
         language_hint = "es"
     elif re.search(r"\benglish\b|\beng(?:-|$)", n):
         language_hint = "en"
