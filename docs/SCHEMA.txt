@@ -1,0 +1,22 @@
+PROVIDER
+  |
+  +-- CATEGORIES
+  |
+  +-- STREAMS
+          |
+          v
+       VERSION
+       /      \
+  MOVIE/      EPISODE
+     |          |
+     |       SEASON
+     |          |
+     +------ SERIES
+
+MOVIE <--> COLLECTION (saga)
+
+CONTENT <--> CATEGORIES
+
+SYNC_RUN
+   |
+   +--> CHANGE_EVENTS
