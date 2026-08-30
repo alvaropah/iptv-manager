@@ -1,7 +1,9 @@
 from __future__ import annotations
+
 import re
 import unicodedata
 from dataclasses import dataclass
+
 
 @dataclass(frozen=True)
 class CategoryProfile:
@@ -12,16 +14,21 @@ class CategoryProfile:
     subtitles: bool | None = None
     language_hint: str | None = None
 
+
 def _fold(value: str) -> str:
     value = unicodedata.normalize("NFKC", value or "")
     value = value.casefold()
     return re.sub(r"\s+", " ", value).strip()
 
+
 def infer_category_profile(category_name: str) -> CategoryProfile:
+    """Conservative category signals; no stream-level facts are invented."""
     n = _fold(category_name)
+
     quality = resolution = dynamic_range = audio = language_hint = None
     subtitles = None
 
+    # Explicit quality signals.
     if re.search(r"\b8k\b", n):
         quality, resolution = "8K", "4320p"
     elif re.search(r"\b4k\b|3840p", n):
@@ -31,18 +38,22 @@ def infer_category_profile(category_name: str) -> CategoryProfile:
     elif re.search(r"\b720p\b|\bhd\b", n):
         quality, resolution = "720p", "720p"
 
-    if "dolby vision" in n:
+    # Dolby Vision is more specific than generic HDR, so it wins.
+    if "dolby vision" in n or "dolby ⱽᶦˢᶦᵒⁿ" in category_name.casefold():
         dynamic_range = "Dolby Vision"
-    elif re.search(r"\bhdr\b", n):
+    elif re.search(r"\bhdr\b", n) or "ᴴᴰᴿ" in category_name:
         dynamic_range = "HDR"
 
-    if "dolby audio" in n:
+    # Dolby Audio.
+    if "dolby audio" in n or "ᴰᴼᴸᴮʸ ᴬᵁᴰᴵᴼ" in category_name:
         audio = "Dolby Audio"
 
-    if "subtitles" in n or "subtitle" in n or "subtitled" in n:
+    # Explicit subtitle markers, including MULTI-SUBS.
+    if re.search(r"\bsubtitles?\b|\bsubtitled\b|\bsubs\b", n):
         subtitles = True
 
-    if re.search(r"\bespaña\b|\bes(?:-|$)", n):
+    # Language is only a hint. ES- prefixed categories are also a Spanish hint.
+    if re.search(r"^es\s*[-–—]", n) or re.search(r"\bespaña\b", n):
         language_hint = "es"
     elif re.search(r"\benglish\b|\beng(?:-|$)", n):
         language_hint = "en"
