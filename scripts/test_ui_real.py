@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 DB = Path("data/iptv_manager.db")
+REQUIRED = {"content","version","stream","season","episode","episode_version","episode_stream","category"}
 
 def main():
     print("=" * 72)
@@ -21,22 +22,26 @@ def main():
 
     conn = sqlite3.connect(DB)
     try:
-        tables = ("content", "version", "stream", "season", "episode", "category")
-        counts = {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in tables}
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        missing = REQUIRED - tables
+        if missing:
+            raise RuntimeError(f"BD incompatible; faltan tablas: {sorted(missing)}")
+        integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+        assert integrity == "ok", f"integrity_check={integrity}"
+
+        counts = {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in REQUIRED}
         row = conn.execute(
-            "SELECT normalized_title FROM content "
-            "WHERE is_active=1 AND normalized_title IS NOT NULL "
-            "AND length(trim(normalized_title)) >= 3 ORDER BY id LIMIT 1"
+            "SELECT normalized_title FROM content WHERE is_active=1 "
+            "AND normalized_title IS NOT NULL AND length(trim(normalized_title)) >= 3 "
+            "ORDER BY id LIMIT 1"
         ).fetchone()
     finally:
         conn.close()
 
     print(f"  BD real encontrada: {DB} ({DB.stat().st_size / 1024 / 1024:.1f} MB)")
-    for k, v in counts.items():
-        print(f"  {k}: {v}")
-
-    assert counts["content"] > 0 and counts["version"] > 0 and counts["stream"] > 0
-    assert counts["category"] > 0
+    print("  SQLite integrity_check: OK")
+    for k in sorted(counts):
+        print(f"  {k}: {counts[k]}")
 
     r = client.get("/api/stats")
     assert r.status_code == 200, r.text

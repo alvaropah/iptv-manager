@@ -24,66 +24,105 @@ jobs:
       - name: Instalar dependencias
         run: pip install -r requirements.txt
 
-      - name: Recuperar BD persistida con esquema compatible
+      - name: Recuperar BD compatible
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
+          rm -rf data candidates
           mkdir -p data candidates
 
-          REQUIRED_TABLES="content version stream season episode episode_version episode_stream category"
-
           validate_db() {
-            local db="$1"
-            [ -f "$db" ] || return 1
+            DB="$1" python - <<'PY'
+import os, sqlite3, sys
+db = os.environ["DB"]
+required = {
+    "content", "version", "stream", "season",
+    "episode", "episode_version", "episode_stream", "category"
+}
+try:
+    con = sqlite3.connect(db)
+    integrity = con.execute("PRAGMA integrity_check").fetchone()[0]
+    tables = {
+        r[0] for r in con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+    con.close()
+except Exception as e:
+    print(f"VALIDATION ERROR: {e}")
+    sys.exit(1)
 
-            sqlite3 "$db" "PRAGMA integrity_check;" | grep -qx ok || return 1
-
-            local missing
-            missing="$(sqlite3 "$db" "SELECT group_concat(name, ' ') FROM sqlite_master WHERE type='table' AND name IN ('content','version','stream','season','episode','episode_version','episode_stream','category');")"
-            for table in $REQUIRED_TABLES; do
-              echo "$missing" | grep -qw "$table" || return 1
-            done
-            return 0
+print("  tablas encontradas:", " ".join(sorted(tables)))
+print("  integrity_check:", integrity)
+missing = required - tables
+if integrity != "ok" or missing:
+    if missing:
+        print("  faltan tablas:", " ".join(sorted(missing)))
+    sys.exit(1)
+print("  esquema compatible: OK")
+PY
           }
 
-          try_run() {
-            local workflow="$1"
-            local limit="$2"
+          find_db() {
+            find candidates -type f -name "*.db" -print -quit
+          }
 
-            echo "Buscando ejecuciones exitosas de: $workflow"
-            mapfile -t RUN_IDS < <(
-              gh run list \
-                --workflow "$workflow" \
-                --status success \
-                --limit "$limit" \
-                --json databaseId \
-                --jq '.[].databaseId'
-            )
+          download_and_validate() {
+            local run_id="$1"
+            local artifact="$2"
+            rm -rf candidates/*
+            echo "Descargando $artifact desde ejecución $run_id..."
+            if ! gh run download "$run_id" --name "$artifact" --dir candidates; then
+              echo "  No se pudo descargar el artifact."
+              return 1
+            fi
 
-            for RUN_ID in "${RUN_IDS[@]}"; do
-              [ -n "$RUN_ID" ] || continue
-              echo "Probando ejecución: $RUN_ID"
-              rm -rf candidates/*
-              if gh run download "$RUN_ID" --name iptv-manager-v031-catalog --dir candidates 2>/dev/null; then
-                if validate_db "candidates/iptv_manager.db"; then
-                  echo "BD COMPATIBLE encontrada en ejecución $RUN_ID"
-                  cp candidates/iptv_manager.db data/iptv_manager.db
-                  return 0
-                fi
-                echo "Artifact $RUN_ID no tiene el esquema requerido; se continúa."
-              fi
-            done
+            local db
+            db="$(find_db || true)"
+            if [ -z "$db" ]; then
+              echo "  Artifact descargado pero no contiene ningún .db"
+              find candidates -maxdepth 3 -type f -print || true
+              return 1
+            fi
+
+            echo "  BD candidata: $db ($(du -h "$db" | cut -f1))"
+            if validate_db "$db"; then
+              cp "$db" data/iptv_manager.db
+              return 0
+            fi
+            echo "  BD descartada: esquema incompatible."
             return 1
           }
 
-          if ! try_run "03-1-sync-persistent.yml" 10; then
+          echo "Buscando una BD compatible en v0.3.1..."
+          mapfile -t RUN_IDS < <(
+            gh run list \
+              --workflow 03-1-sync-persistent.yml \
+              --status success \
+              --limit 10 \
+              --json databaseId \
+              --jq '.[].databaseId'
+          )
+
+          FOUND=0
+          for RUN_ID in "${RUN_IDS[@]}"; do
+            [ -n "$RUN_ID" ] || continue
+            echo "Probando ejecución v0.3.1: $RUN_ID"
+            if download_and_validate "$RUN_ID" "iptv-manager-v031-catalog"; then
+              echo "BD compatible encontrada en v0.3.1: $RUN_ID"
+              FOUND=1
+              break
+            fi
+          done
+
+          if [ "$FOUND" -eq 0 ]; then
             echo "No se encontró una BD compatible en v0.3.1."
-            echo "Probando fallback en v0.3..."
+            echo "Probando v0.3..."
             mapfile -t RUN_IDS < <(
               gh run list \
-                --workflow "06-sync-catalog-v03.yml" \
+                --workflow 06-sync-catalog-v03.yml \
                 --status success \
                 --limit 10 \
                 --json databaseId \
@@ -93,23 +132,22 @@ jobs:
             for RUN_ID in "${RUN_IDS[@]}"; do
               [ -n "$RUN_ID" ] || continue
               echo "Probando ejecución v0.3: $RUN_ID"
-              rm -rf candidates/*
-              if gh run download "$RUN_ID" --name iptv-manager-v03-catalog --dir candidates 2>/dev/null; then
-                if validate_db "candidates/iptv_manager.db"; then
-                  echo "BD COMPATIBLE encontrada en ejecución $RUN_ID"
-                  cp candidates/iptv_manager.db data/iptv_manager.db
-                  break
-                fi
+              if download_and_validate "$RUN_ID" "iptv-manager-v03-catalog"; then
+                echo "BD compatible encontrada en v0.3: $RUN_ID"
+                FOUND=1
+                break
               fi
             done
           fi
 
+          if [ "$FOUND" -ne 1 ]; then
+            echo "ERROR: no se encontró ningún artifact con el esquema persistente requerido."
+            exit 1
+          fi
+
           test -f data/iptv_manager.db
-          echo "BD restaurada: $(du -h data/iptv_manager.db | cut -f1)"
-          echo "Comprobando esquema compatible..."
-          sqlite3 data/iptv_manager.db ".tables"
-          validate_db data/iptv_manager.db
-          echo "SQLite integrity_check + esquema: OK"
+          echo "BD final restaurada: $(du -h data/iptv_manager.db | cut -f1)"
+          rm -rf candidates
 
       - name: Validar UI contra catálogo real
         env:
