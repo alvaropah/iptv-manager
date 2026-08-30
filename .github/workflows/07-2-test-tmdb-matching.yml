@@ -1,0 +1,26 @@
+name: 07.2 - TMDB Matching Regression
+
+on:
+  push:
+    paths:
+      - 'app/services/metadata.py'
+      - 'scripts/test_v070_episodes.py'
+      - '.github/workflows/07-2-test-tmdb-matching.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run TMDB matching regression tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/test_v070_episodes.py
