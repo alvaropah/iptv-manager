@@ -10,7 +10,7 @@ permissions:
 jobs:
   api-real:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Descargar repositorio
         uses: actions/checkout@v4
@@ -38,6 +38,7 @@ jobs:
             echo "Ejecución v0.3.1 encontrada: $RUN_ID"
             if gh run download "$RUN_ID" --name iptv-manager-v031-catalog --dir data; then
               echo "Artifact v0.3.1 descargado."
+              ls -lh data/iptv_manager.db || true
             else
               echo "No se pudo descargar el artifact v0.3.1; se intentará fallback v0.3."
             fi
@@ -58,6 +59,9 @@ jobs:
 
           test -f data/iptv_manager.db
           echo "BD restaurada: $(du -h data/iptv_manager.db | cut -f1)"
+          echo "Comprobando integridad SQLite..."
+          sqlite3 data/iptv_manager.db "PRAGMA integrity_check;" | grep -qx ok
+          echo "SQLite integrity_check: OK"
 
       - name: Ejecutar validación API sobre catálogo real
         env:

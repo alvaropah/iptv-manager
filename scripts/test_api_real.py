@@ -33,24 +33,59 @@ def main() -> None:
             "streams": scalar(conn, "SELECT COUNT(*) FROM streams WHERE is_active=1"),
             "categories": scalar(conn, "SELECT COUNT(*) FROM categories WHERE selected=1"),
         }
+
         movie = conn.execute(
-            "SELECT id, canonical_title FROM content WHERE content_type='movie' AND is_active=1 ORDER BY id LIMIT 1"
+            """
+            SELECT c.id, c.canonical_title
+            FROM content c
+            JOIN versions v ON v.content_id=c.id AND v.is_active=1
+            JOIN streams s ON s.version_id=v.id AND s.is_active=1
+            WHERE c.content_type='movie' AND c.is_active=1
+            ORDER BY c.id LIMIT 1
+            """
         ).fetchone()
+
         series = conn.execute(
-            "SELECT id, canonical_title FROM content WHERE content_type='series' AND is_active=1 ORDER BY id LIMIT 1"
+            """
+            SELECT c.id, c.canonical_title
+            FROM content c
+            JOIN seasons se ON se.series_id=c.id AND se.is_active=1
+            JOIN episodes e ON e.season_id=se.id AND e.is_active=1
+            JOIN versions v ON v.episode_id=e.id AND v.is_active=1
+            JOIN streams s ON s.version_id=v.id AND s.is_active=1
+            WHERE c.content_type='series' AND c.is_active=1
+            ORDER BY c.id LIMIT 1
+            """
         ).fetchone()
+
         episode = conn.execute(
-            "SELECT id FROM episodes WHERE is_active=1 ORDER BY id LIMIT 1"
+            """
+            SELECT e.id, e.canonical_title
+            FROM episodes e
+            JOIN versions v ON v.episode_id=e.id AND v.is_active=1
+            JOIN streams s ON s.version_id=v.id AND s.is_active=1
+            WHERE e.is_active=1
+            ORDER BY e.id LIMIT 1
+            """
         ).fetchone()
+
+        search_seed_row = conn.execute(
+            "SELECT canonical_title FROM content WHERE is_active=1 ORDER BY id LIMIT 1"
+        ).fetchone()
+        search_seed = (search_seed_row[0] if search_seed_row else "")[:3]
 
     if counts["movies"] == 0 or counts["series"] == 0:
         raise RuntimeError(f"La BD no parece contener un catálogo real: {counts}")
+    if counts["versions"] == 0 or counts["streams"] == 0:
+        raise RuntimeError(f"La BD no contiene versiones/streams activos: {counts}")
+    if movie is None or series is None or episode is None:
+        raise RuntimeError("No se encontraron registros reales con relaciones completas para probar la API.")
 
     print("Conteo persistido:")
     for key, value in counts.items():
         print(f"  {key}: {value}")
 
-    # The application reads DATABASE_PATH at import time, so this env var must be set before imports.
+    # DATABASE_PATH must be set before importing the application.
     os.environ["DATABASE_PATH"] = str(db_path)
     from app.main import app
 
@@ -72,40 +107,54 @@ def main() -> None:
                 raise RuntimeError(f"/api/stats {key}: BD={counts[key]}, API={api_stats.get(key)}")
         print("  OK | /api/stats coincide con SQLite")
 
-        if movie:
-            movie_id, movie_title = movie
-            response = client.get(f"/api/movies/{movie_id}")
-            if response.status_code != 200:
-                raise RuntimeError(f"Película real {movie_id}: HTTP {response.status_code}")
-            data = response.json()
-            print(f"  OK | película real: {movie_title} | versiones={len(data.get('versions', []))}")
+        movie_id, movie_title = movie
+        response = client.get(f"/api/movies/{movie_id}")
+        if response.status_code != 200:
+            raise RuntimeError(f"Película real {movie_id}: HTTP {response.status_code}")
+        movie_data = response.json()
+        if not movie_data.get("versions"):
+            raise RuntimeError(f"Película real {movie_id} no devuelve versiones")
+        if not any(v.get("streams") for v in movie_data["versions"]):
+            raise RuntimeError(f"Película real {movie_id} no devuelve streams")
+        print(f"  OK | película real: {movie_title} | versiones={len(movie_data['versions'])}")
 
-        if series:
-            series_id, series_title = series
-            response = client.get(f"/api/series/{series_id}")
-            if response.status_code != 200:
-                raise RuntimeError(f"Serie real {series_id}: HTTP {response.status_code}")
-            data = response.json()
-            seasons = data.get("seasons", [])
-            print(f"  OK | serie real: {series_title} | temporadas={len(seasons)}")
+        series_id, series_title = series
+        response = client.get(f"/api/series/{series_id}")
+        if response.status_code != 200:
+            raise RuntimeError(f"Serie real {series_id}: HTTP {response.status_code}")
+        series_data = response.json()
+        seasons = series_data.get("seasons", [])
+        if not seasons:
+            raise RuntimeError(f"Serie real {series_id} no devuelve temporadas")
+        episode_count = sum(len(s.get("episodes", [])) for s in seasons)
+        if episode_count == 0:
+            raise RuntimeError(f"Serie real {series_id} no devuelve episodios")
+        print(f"  OK | serie real: {series_title} | temporadas={len(seasons)} | episodios={episode_count}")
 
-        if episode:
-            episode_id = episode[0]
-            response = client.get(f"/api/episodes/{episode_id}")
-            if response.status_code != 200:
-                raise RuntimeError(f"Episodio real {episode_id}: HTTP {response.status_code}")
-            data = response.json()
-            print(f"  OK | episodio real: {data.get('title')} | versiones={len(data.get('versions', []))}")
+        episode_id, episode_title = episode
+        response = client.get(f"/api/episodes/{episode_id}")
+        if response.status_code != 200:
+            raise RuntimeError(f"Episodio real {episode_id}: HTTP {response.status_code}")
+        episode_data = response.json()
+        if not episode_data.get("versions"):
+            raise RuntimeError(f"Episodio real {episode_id} no devuelve versiones")
+        if not any(v.get("streams") for v in episode_data["versions"]):
+            raise RuntimeError(f"Episodio real {episode_id} no devuelve streams")
+        print(f"  OK | episodio real: {episode_title} | versiones={len(episode_data['versions'])}")
 
-        response = client.get("/api/movies/999999999")
+        response = client.get("/api/movies/999999999999")
         if response.status_code != 404:
             raise RuntimeError(f"Contenido inexistente: esperado 404, obtenido {response.status_code}")
         print("  OK | contenido inexistente → 404")
 
-        response = client.get("/api/search?q=the")
-        if response.status_code != 200:
-            raise RuntimeError(f"Búsqueda: HTTP {response.status_code}: {response.text[:500]}")
-        print(f"  OK | búsqueda real → {len(response.json().get('results', []))} resultados")
+        if search_seed:
+            response = client.get("/api/search", params={"q": search_seed})
+            if response.status_code != 200:
+                raise RuntimeError(f"Búsqueda: HTTP {response.status_code}: {response.text[:500]}")
+            results = response.json().get("results", [])
+            if not results:
+                raise RuntimeError(f"La búsqueda real no devolvió resultados para '{search_seed}'")
+            print(f"  OK | búsqueda real '{search_seed}' → {len(results)} resultados")
 
     print("=" * 72)
     print("v0.4.1 COMPLETADA")
