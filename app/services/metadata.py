@@ -6,6 +6,7 @@ from difflib import SequenceMatcher
 
 TECH_RE = re.compile(r"\b(?:4k|2160p|1080p|720p|4320p|hdr10\+?|dolby.?vision|dolby.?audio|dolby.?atmos|dual.?audio|multi.?subs?|espanol|castellano|latino|vose|web.?dl|web.?rip|bluray|blu.?ray|hdtv|remux|hevc|x264|x265|h264|h265|aac|ac3|dts|uhd|fhd|sd)\b", re.I)
 YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2})\b")
+COUNTRY_SUFFIX_RE = re.compile(r"\s*\([A-Z]{2}\)\s*$")
 PROVIDER_PREFIX_RE = re.compile(r"^(?:4k|8k|uhd|fhd|hd|amz|amazon|netflix|disney\+?|disney|apple\+?|apple|hbo|max|paramount\+?|sky|osn\+?|peacock|showtime|prime\+?|prime|crunchyroll|discovery\+?|discovery|vix(?:\s+premium)?|movistar|atresplayer|rtve|starz|hulu|viaplay|filmin|rakuten|nickelodeon|marvel)\s*[-_:|]\s*", re.I)
 
 # Significant installment markers. These are identity evidence, not removable noise.
@@ -44,16 +45,25 @@ def extract_year(title: str, year: int | None = None) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def _clean_search_title(value: str) -> str:
+    """Build a TMDB search title without provider/year/country packaging noise."""
+    value = clean_provider_title(value)
+    value = YEAR_RE.sub(" ", value)
+    # Provider feeds commonly append the two-letter origin country after the year,
+    # e.g. "Clarkson's Farm (2021) (GB)". It is search metadata, not part of title.
+    value = COUNTRY_SUFFIX_RE.sub(" ", value)
+    value = re.sub(r"\(\s*\)|\[\s*\]", " ", value)
+    value = re.sub(r"\s+", " ", value).strip(" -_:|()[]")
+    return value
+
+
 def title_queries(provider_title: str, year: int | None = None, original_title: str | None = None) -> list[str]:
-    clean = clean_provider_title(provider_title)
-    values = [clean]
+    values = [provider_title]
     if original_title:
-        values.append(clean_provider_title(original_title))
+        values.append(original_title)
     out: list[str] = []
     for value in values:
-        value = YEAR_RE.sub(" ", value)
-        value = re.sub(r"\(\s*\)|\[\s*\]", " ", value)
-        value = re.sub(r"\s+", " ", value).strip(" -_:|()[]")
+        value = _clean_search_title(value)
         if value and value not in out:
             out.append(value)
     return out
