@@ -20,7 +20,7 @@ from app.services.metadata import classify_match, extract_country, extract_year,
 from scripts.enrich_tmdb import rank_candidates, save_metadata, search_candidates
 
 
-def save_episode_metadata(conn, row, result):
+def save_episode_metadata(conn, row, result, matched_by="series_id+season_number+episode_number"):
     external_id = str(result["id"])
     still_path = result.get("still_path")
     still_url = f"https://image.tmdb.org/t/p/w780{still_path}" if still_path else None
@@ -44,8 +44,7 @@ def save_episode_metadata(conn, row, result):
         """INSERT INTO metadata_links
         (episode_id,provider_title,external_source,external_id,match_status,match_score,matched_by,updated_at)
         VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)""",
-        (row["episode_id"], row["provider_title"], "tmdb", external_id, "matched", 1.0,
-         "series_id+season_number+episode_number"),
+        (row["episode_id"], row["provider_title"], "tmdb", external_id, "matched", 1.0, matched_by),
     )
 
 
@@ -116,6 +115,58 @@ def resolve_series_tmdb_id(conn: object, client: TMDBClient, series_id: int, cac
     return tmdb_id, True
 
 
+def resolve_episode_with_fallback(client: TMDBClient, row, primary_tmdb_series_id: str, diagnostic: bool = False):
+    """Resolve an episode, retrying alternative high-confidence series candidates when
+    the primary TMDB series does not expose the requested season/episode.
+
+    This is intentionally episode-level: we never silently replace the canonical
+    series mapping just because one TMDB record has incomplete season numbering.
+    """
+    season = int(row["season_number"])
+    episode = int(row["episode_number"])
+    try:
+        return client.episode(int(primary_tmdb_series_id), season, episode), "series_id+season_number+episode_number"
+    except requests.HTTPError as exc:
+        if _http_status(exc) != 404:
+            raise
+
+    provider_title = str(row["provider_title"])
+    year = extract_year(provider_title, None)
+    country = extract_country(provider_title)
+    queries = title_queries(provider_title, year, None)
+    candidates: list[dict] = []
+    query_used = None
+    for query in queries:
+        query_used = query
+        candidates = search_candidates(client, "series", query, year)
+        if candidates:
+            break
+
+    if not candidates:
+        return None, None
+
+    ranked = rank_candidates(client, "series", provider_title, year, candidates, country, diagnostic=diagnostic)
+    for score, candidate in ranked:
+        candidate_id = int(candidate["id"])
+        if candidate_id == int(primary_tmdb_series_id) or classify_match(score) != "matched":
+            continue
+        try:
+            result = client.episode(candidate_id, season, episode)
+        except requests.HTTPError as exc:
+            if _http_status(exc) == 404:
+                continue
+            raise
+        print(
+            f"    EPISODE FALLBACK | {provider_title} | S{season:02d}E{episode:02d} "
+            f"| primary={primary_tmdb_series_id} | fallback={candidate_id} | score={score:.2f} "
+            f"| query={query_used}",
+            flush=True,
+        )
+        return result, f"alternate_series_candidate+season_number+episode_number+score_{score:.2f}"
+
+    return None, None
+
+
 def _http_status(exc: Exception) -> int | None:
     if isinstance(exc, requests.HTTPError) and exc.response is not None:
         return exc.response.status_code
@@ -177,17 +228,15 @@ def main():
                     pending += 1
                     print(f"[{index}/{len(rows)}] PENDING | {row['provider_title']} | serie_id={row['series_id']} | sin TMDB series", flush=True)
                     continue
-                try:
-                    result = client.episode(int(tmdb_series_id), int(row["season_number"]), int(row["episode_number"]))
-                except requests.HTTPError as exc:
-                    status = _http_status(exc)
-                    if status == 404:
-                        pending += 1
-                        print(f"[{index}/{len(rows)}] PENDING | {row['provider_title']} | TMDB episode inexistente S{row['season_number']:02d}E{row['episode_number']:02d} | tmdb_series={tmdb_series_id}", flush=True)
-                        conn.rollback()
-                        continue
-                    raise
-                save_episode_metadata(conn, row, result)
+
+                result, matched_by = resolve_episode_with_fallback(client, row, tmdb_series_id, diagnostic=args.diagnostic)
+                if result is None:
+                    pending += 1
+                    print(f"[{index}/{len(rows)}] PENDING | {row['provider_title']} | TMDB episode inexistente S{row['season_number']:02d}E{row['episode_number']:02d} | tmdb_series={tmdb_series_id}", flush=True)
+                    conn.rollback()
+                    continue
+
+                save_episode_metadata(conn, row, result, matched_by=matched_by or "series_id+season_number+episode_number")
                 conn.commit()
                 matched += 1
                 print(f"[{index}/{len(rows)}] MATCHED | {row['provider_title']} -> {result.get('name') or '?'} | S{row['season_number']:02d}E{row['episode_number']:02d} | tmdb_series={tmdb_series_id}", flush=True)
