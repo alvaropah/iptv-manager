@@ -109,13 +109,16 @@ def _ensure_metadata_links_schema(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_metadata_links_content ON metadata_links(content_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_metadata_links_episode ON metadata_links(episode_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_metadata_links_status ON metadata_links(match_status)")
-    conn.execute("""INSERT INTO metadata_links
+
+    legacy_columns = {row[1] for row in conn.execute("PRAGMA table_info(metadata_links_legacy)")}
+    created_expr = "created_at" if "created_at" in legacy_columns else "CURRENT_TIMESTAMP"
+    updated_expr = "updated_at" if "updated_at" in legacy_columns else "CURRENT_TIMESTAMP"
+    conn.execute(f"""INSERT INTO metadata_links
         (id, content_id, provider_title, external_source, external_id,
          match_status, match_score, matched_by, created_at, updated_at)
         SELECT id, content_id, provider_title, external_source, external_id,
                match_status, match_score, matched_by,
-               COALESCE(created_at, CURRENT_TIMESTAMP),
-               COALESCE(updated_at, CURRENT_TIMESTAMP)
+               {created_expr}, {updated_expr}
         FROM metadata_links_legacy""")
     conn.execute("DROP TABLE metadata_links_legacy")
     conn.execute("PRAGMA foreign_keys=ON")
