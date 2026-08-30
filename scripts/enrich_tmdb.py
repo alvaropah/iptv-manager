@@ -37,7 +37,7 @@ def save_metadata(conn, row, result, score, status):
     conn.execute("""INSERT INTO metadata_links(content_id,provider_title,external_source,external_id,match_status,match_score,matched_by,updated_at)
       VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
       ON CONFLICT(content_id,external_source) DO UPDATE SET provider_title=excluded.provider_title,external_id=excluded.external_id,match_status=excluded.match_status,match_score=excluded.match_score,matched_by=excluded.matched_by,updated_at=CURRENT_TIMESTAMP""",
-      (row["id"], row["canonical_title"], "tmdb", tmdb_id, status, score, "clean_title+year"))
+      (row["id"], row["canonical_title"], "tmdb", tmdb_id, status, score, "clean_title+year+multilang"))
     if status != "matched":
         return
     runtime = result.get("runtime") if is_movie else ((result.get("episode_run_time") or [None])[0])
@@ -45,6 +45,26 @@ def save_metadata(conn, row, result, score, status):
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
       ON CONFLICT(content_id) DO UPDATE SET source=excluded.source,external_id=excluded.external_id,title=excluded.title,original_title=excluded.original_title,overview=excluded.overview,year=excluded.year,runtime=excluded.runtime,genres_json=excluded.genres_json,director=excluded.director,creators_json=excluded.creators_json,cast_json=excluded.cast_json,poster_url=excluded.poster_url,backdrop_url=excluded.backdrop_url,rating=excluded.rating,raw_json=excluded.raw_json,language=excluded.language,updated_at=CURRENT_TIMESTAMP""",
       (row["id"], "tmdb", tmdb_id, title, original, result.get("overview"), year, runtime, json.dumps(genres, ensure_ascii=False), ", ".join(x for x in directors if x), json.dumps(creators, ensure_ascii=False), json.dumps(cast, ensure_ascii=False), poster, backdrop, result.get("vote_average"), json.dumps(result, ensure_ascii=False), settings.tmdb_language))
+
+
+def search_candidates(client, content_type, query, year):
+    """Search in Spanish first, then English so titles whose TMDB display name is non-Latin are recoverable."""
+    search = client.search_movie if content_type == "movie" else client.search_tv
+    candidates = []
+    seen = set()
+    # Spanish is preferred because it gives us Spanish-facing metadata.
+    for language in (settings.tmdb_language, "en-US"):
+        for use_year in (True, False):
+            found = search(query, year if use_year else None, language=language)
+            for item in found:
+                if item.get("id") not in seen:
+                    candidates.append(item)
+                    seen.add(item.get("id"))
+            if found:
+                # Keep the remaining language as a fallback, but don't hammer the API
+                # with a year/no-year pair once a good result set exists.
+                break
+    return candidates
 
 
 def main():
@@ -68,22 +88,18 @@ def main():
             try:
                 year = extract_year(row["canonical_title"], row["year"])
                 queries = title_queries(row["canonical_title"], year, row["original_title"])
-                candidates = []
+                all_candidates = []
                 query_used = None
                 for query in queries:
                     query_used = query
-                    candidates = client.search_movie(query, year) if row["content_type"] == "movie" else client.search_tv(query, year)
-                    if candidates:
+                    all_candidates = search_candidates(client, row["content_type"], query, year)
+                    if all_candidates:
                         break
-                    # If year-filtered search fails, retry without year before abandoning the query.
-                    candidates = client.search_movie(query) if row["content_type"] == "movie" else client.search_tv(query)
-                    if candidates:
-                        break
-                if not candidates:
+                if not all_candidates:
                     no_candidates += 1
                     print(f"[{index}/{len(rows)}] NO MATCH | proveedor={row['canonical_title']} | consulta={query_used}")
                     continue
-                ranked = sorted(((score_candidate(row["canonical_title"], year, c), c) for c in candidates), key=lambda x: x[0], reverse=True)
+                ranked = sorted(((score_candidate(row["canonical_title"], year, c), c) for c in all_candidates), key=lambda x: x[0], reverse=True)
                 score, candidate = ranked[0]
                 status = classify_match(score)
                 detail = client.movie(candidate["id"]) if row["content_type"] == "movie" else client.tv(candidate["id"])
@@ -92,6 +108,7 @@ def main():
                 elif status == "review": review += 1
                 else: rejected += 1
                 display = detail.get("title") or detail.get("name") or "?"
+                lang = "en-US" if candidate in [] else ""
                 print(f"[{index}/{len(rows)}] {status.upper()} | {row['canonical_title']} -> {display} | score={score:.2f} | query={query_used}")
                 if index % 10 == 0:
                     conn.commit()
