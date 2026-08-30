@@ -37,7 +37,7 @@ def save_metadata(conn, row, result, score, status):
     conn.execute("""INSERT INTO metadata_links(content_id,provider_title,external_source,external_id,match_status,match_score,matched_by,updated_at)
       VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
       ON CONFLICT(content_id,external_source) DO UPDATE SET provider_title=excluded.provider_title,external_id=excluded.external_id,match_status=excluded.match_status,match_score=excluded.match_score,matched_by=excluded.matched_by,updated_at=CURRENT_TIMESTAMP""",
-      (row["id"], row["canonical_title"], "tmdb", tmdb_id, status, score, "clean_title+year+multilang+alternative_titles+evidence"))
+      (row["id"], row["canonical_title"], "tmdb", tmdb_id, status, score, "clean_title+multilang+alternative_titles+evidence"))
     if status != "matched":
         return
     runtime = result.get("runtime") if is_movie else ((result.get("episode_run_time") or [None])[0])
@@ -64,7 +64,15 @@ def search_candidates(client: TMDBClient, content_type: str, query: str, year: i
             for item in found:
                 item_id = item.get("id")
                 if item_id is not None:
-                    merged[int(item_id)] = item
+                    current = merged.get(int(item_id), {})
+                    # Preserve title/name variants returned by different locales.
+                    merged[int(item_id)] = {**current, **item}
+                    for key in ("title", "name", "original_title", "original_name"):
+                        if item.get(key) and item.get(key) != current.get(key):
+                            variants = current.get("_locale_variants", [])
+                            if item[key] not in variants:
+                                variants.append(item[key])
+                            merged[int(item_id)]["_locale_variants"] = variants
     return list(merged.values())
 
 
@@ -72,8 +80,6 @@ def rank_candidates(client: TMDBClient, content_type: str, provider_title: str, 
     ranked = []
     for candidate in candidates:
         score = score_candidate(provider_title, year, candidate)
-        # For weak candidates, inspect TMDB alternative titles. A translated or
-        # transliterated title can otherwise look unrelated to the provider title.
         if score < 0.86:
             try:
                 alternatives = client.alternative_titles(candidate["id"], content_type)
