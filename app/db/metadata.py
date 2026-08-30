@@ -75,7 +75,54 @@ CREATE TABLE IF NOT EXISTS person_metadata (
 """
 
 
+def _ensure_metadata_links_schema(conn: sqlite3.Connection) -> None:
+    """Upgrade the pre-episode metadata_links table in-place when necessary."""
+    rows = conn.execute("PRAGMA table_info(metadata_links)").fetchall()
+    if not rows:
+        return
+
+    columns = {row[1] for row in rows}
+    if "episode_id" in columns:
+        return
+
+    # Older databases only supported content-level metadata links. Rebuild the
+    # table so episode-level TMDB links can coexist without losing old matches.
+    conn.execute("PRAGMA foreign_keys=OFF")
+    conn.execute("ALTER TABLE metadata_links RENAME TO metadata_links_legacy")
+    conn.execute("""CREATE TABLE metadata_links (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        content_id INTEGER,
+        episode_id INTEGER,
+        provider_title TEXT,
+        external_source TEXT NOT NULL,
+        external_id TEXT NOT NULL,
+        match_status TEXT NOT NULL DEFAULT 'matched' CHECK(match_status IN ('matched','review','rejected')),
+        match_score REAL,
+        matched_by TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(external_source, external_id),
+        CHECK ((content_id IS NOT NULL AND episode_id IS NULL) OR (content_id IS NULL AND episode_id IS NOT NULL)),
+        FOREIGN KEY(content_id) REFERENCES content(id) ON DELETE CASCADE,
+        FOREIGN KEY(episode_id) REFERENCES episodes(id) ON DELETE CASCADE
+    )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_metadata_links_content ON metadata_links(content_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_metadata_links_episode ON metadata_links(episode_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_metadata_links_status ON metadata_links(match_status)")
+    conn.execute("""INSERT INTO metadata_links
+        (id, content_id, provider_title, external_source, external_id,
+         match_status, match_score, matched_by, created_at, updated_at)
+        SELECT id, content_id, provider_title, external_source, external_id,
+               match_status, match_score, matched_by,
+               COALESCE(created_at, CURRENT_TIMESTAMP),
+               COALESCE(updated_at, CURRENT_TIMESTAMP)
+        FROM metadata_links_legacy""")
+    conn.execute("DROP TABLE metadata_links_legacy")
+    conn.execute("PRAGMA foreign_keys=ON")
+
+
 def init_metadata_db(conn: sqlite3.Connection) -> None:
+    _ensure_metadata_links_schema(conn)
     conn.executescript(METADATA_SCHEMA)
 
 
