@@ -57,6 +57,9 @@ class XtreamClient:
     def vod_streams(self, category_id: str):
         return self.api("get_vod_streams", category_id=category_id)
 
+    def vod_info(self, stream_id: str):
+        return self.api("get_vod_info", vod_id=stream_id)
+
     def series_streams(self, category_id: str):
         return self.api("get_series", category_id=category_id)
 

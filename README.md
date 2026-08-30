@@ -1,15 +1,24 @@
-# IPTV Manager — v0.2 / Paso 4.1
+# IPTV Manager — v0.2 / Paso 5
 
-Repositorio completo hasta la verificación 4.1.
+Proyecto central del catálogo IPTV.
 
-La Prueba 4.1 corrige y comprueba:
-- Dolby Vision > HDR cuando ambos aparecen.
-- Variantes Unicode de Dolby Vision.
-- MULTI-SUBS / SUBS como pista de subtítulos.
-- Categorías con prefijo `ES -` como pista de idioma español.
-- Conservación del enfoque conservador: idioma sigue siendo `language_hint`.
+La selección sigue gobernada por `config.yml`:
+- 75 categorías de series
+- 44 categorías de películas
+- LIVE independiente
 
-Workflow actual:
-**04.1 - Verificación perfiles de categorías**
+## Paso 5
 
-No consulta Xtream y no necesita Secrets.
+**05 - Modelo de contenido y versiones**
+
+Esta prueba empieza a transformar las entradas Xtream en un modelo de
+contenido:
+
+Películas → versiones → streams
+
+Series → temporadas → episodios → versiones → streams
+
+Las categorías se conservan como procedencia y como señales de calidad,
+resolución, HDR, Dolby, subtítulos e idioma.
+
+La prueba usa una muestra pequeña y no modifica la playlist estable.
