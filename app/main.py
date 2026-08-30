@@ -16,7 +16,7 @@ from app.db.repository import (
     search_catalog,
 )
 
-APP_VERSION = "0.5.0"
+APP_VERSION = "0.5.1"
 
 app = FastAPI(title="IPTV Manager API", version=APP_VERSION, description="Biblioteca IPTV sobre SQLite. La navegación no consulta Xtream.")
 WEB_DIR = __import__("pathlib").Path(__file__).resolve().parent / "web"
