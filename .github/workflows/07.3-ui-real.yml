@@ -3,28 +3,68 @@ name: 07.3 - UI sobre catálogo real v0.4.3
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   ui-real:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    timeout-minutes: 15
 
-      - uses: actions/setup-python@v5
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
+      - name: Instalar dependencias
         run: pip install -r requirements.txt
 
-      - name: Restore persisted catalog
-        uses: dawidd6/action-download-artifact@v6
-        with:
-          workflow: 07.1-api-real.yml
-          name: iptv-manager-v031-catalog
-          path: data
-          search_artifacts: true
-          workflow_conclusion: success
-          if_no_artifact_found: fail
+      - name: Recuperar última BD persistida
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p data
 
-      - name: Validate UI against real catalog
+          echo "Buscando última ejecución exitosa de v0.3.1..."
+          RUN_ID="$(gh run list --workflow 03-1-sync-persistent.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+
+          if [ -n "$RUN_ID" ]; then
+            echo "Ejecución v0.3.1 encontrada: $RUN_ID"
+            echo "Descargando artifact: iptv-manager-v031-catalog"
+            gh run download "$RUN_ID" --name iptv-manager-v031-catalog --dir data
+          else
+            echo "No se encontró una ejecución v0.3.1 exitosa."
+          fi
+
+          if [ ! -f data/iptv_manager.db ]; then
+            echo "Buscando fallback en la última ejecución v0.3..."
+            RUN_ID="$(gh run list --workflow 06-sync-catalog-v03.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+
+            if [ -z "$RUN_ID" ]; then
+              echo "ERROR: no se encontró una BD persistida de v0.3/v0.3.1."
+              exit 1
+            fi
+
+            echo "Ejecución v0.3 encontrada: $RUN_ID"
+            echo "Descargando artifact: iptv-manager-v03-catalog"
+            gh run download "$RUN_ID" --name iptv-manager-v03-catalog --dir data
+          fi
+
+          test -f data/iptv_manager.db
+          echo "BD restaurada: $(du -h data/iptv_manager.db | cut -f1)"
+          echo "Comprobando integridad SQLite..."
+          sqlite3 data/iptv_manager.db "PRAGMA integrity_check;" | grep -qx ok
+          echo "SQLite integrity_check: OK"
+
+      - name: Validar UI contra catálogo real
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          DATABASE_PATH: data/iptv_manager.db
         run: python scripts/test_ui_real.py
