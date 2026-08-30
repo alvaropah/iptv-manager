@@ -49,7 +49,7 @@ def save_episode_metadata(conn, row, result):
     )
 
 
-def resolve_series_tmdb_id(conn: object, client: TMDBClient, series_id: int, cache: dict[int, str | None]) -> tuple[str | None, bool]:
+def resolve_series_tmdb_id(conn: object, client: TMDBClient, series_id: int, cache: dict[int, str | None], diagnostic: bool = False) -> tuple[str | None, bool]:
     """Return (TMDB series id, newly_resolved)."""
     if series_id in cache:
         return cache[series_id], False
@@ -60,6 +60,7 @@ def resolve_series_tmdb_id(conn: object, client: TMDBClient, series_id: int, cac
     ).fetchone()
     if existing and existing["external_id"]:
         cache[series_id] = str(existing["external_id"])
+        print(f"    SERIES CACHE/DB | serie_id={series_id} | tmdb={cache[series_id]}", flush=True) if diagnostic else None
         return cache[series_id], False
 
     linked = conn.execute(
@@ -70,6 +71,7 @@ def resolve_series_tmdb_id(conn: object, client: TMDBClient, series_id: int, cac
     ).fetchone()
     if linked and linked["external_id"]:
         cache[series_id] = str(linked["external_id"])
+        print(f"    SERIES LINK | serie_id={series_id} | tmdb={cache[series_id]}", flush=True) if diagnostic else None
         return cache[series_id], False
 
     row = conn.execute(
@@ -97,7 +99,7 @@ def resolve_series_tmdb_id(conn: object, client: TMDBClient, series_id: int, cac
         cache[series_id] = None
         return None, True
 
-    ranked = rank_candidates(client, "series", row["canonical_title"], year, candidates, country)
+    ranked = rank_candidates(client, "series", row["canonical_title"], year, candidates, country, diagnostic=diagnostic)
     score, candidate = ranked[0]
     status = classify_match(score)
     if status != "matched":
@@ -124,6 +126,8 @@ def main():
     parser = argparse.ArgumentParser(description="Enriquece episodios con metadata de TMDB")
     parser.add_argument("--limit", type=int, default=200)
     parser.add_argument("--refresh", action="store_true")
+    parser.add_argument("--series-id", type=int, default=None, help="Procesa únicamente una serie concreta")
+    parser.add_argument("--diagnostic", action="store_true", help="Muestra candidatos y señales de matching")
     args = parser.parse_args()
 
     token = settings.tmdb_api_token or os.getenv("TMDB_API_TOKEN", "")
@@ -136,8 +140,12 @@ def main():
         conn.commit()
         client = TMDBClient(token, settings.tmdb_language)
         where = "e.is_active=1 AND c.is_active=1"
+        params: list[object] = []
         if not args.refresh:
             where += " AND em.episode_id IS NULL"
+        if args.series_id is not None:
+            where += " AND c.id=?"
+            params.append(args.series_id)
         rows = conn.execute(
             f"""SELECT e.id AS episode_id, e.canonical_title AS provider_title,
                        c.id AS series_id, s.season_number, e.episode_number
@@ -146,15 +154,20 @@ def main():
                 JOIN content c ON c.id=s.series_id
                 LEFT JOIN episode_metadata em ON em.episode_id=e.id
                 WHERE {where}
-                ORDER BY e.id LIMIT ?""", (args.limit,),
+                ORDER BY s.season_number,e.episode_number,e.id LIMIT ?""", (*params, args.limit),
         ).fetchall()
+
+        if args.series_id is not None:
+            print(f"PREFLIGHT | series_id={args.series_id} | episodes_selected={len(rows)} | limit={args.limit} | refresh={args.refresh}", flush=True)
+        else:
+            print(f"PREFLIGHT | episodes_selected={len(rows)} | limit={args.limit} | refresh={args.refresh}", flush=True)
 
         matched = errors = pending = series_resolved = series_unresolved = 0
         series_cache: dict[int, str | None] = {}
 
         for index, row in enumerate(rows, 1):
             try:
-                tmdb_series_id, newly_resolved = resolve_series_tmdb_id(conn, client, int(row["series_id"]), series_cache)
+                tmdb_series_id, newly_resolved = resolve_series_tmdb_id(conn, client, int(row["series_id"]), series_cache, diagnostic=args.diagnostic)
                 if newly_resolved:
                     if tmdb_series_id:
                         series_resolved += 1
