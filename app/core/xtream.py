@@ -22,10 +22,11 @@ class XtreamClient:
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "IPTV-Manager/0.1"})
 
-    def api(self, action: str | None = None) -> Any:
+    def api(self, action: str | None = None, **extra_params) -> Any:
         params = {"username": self.username, "password": self.password}
         if action:
             params["action"] = action
+        params.update(extra_params)
 
         response = self.session.get(
             f"{self.host}/player_api.php",
@@ -52,3 +53,12 @@ class XtreamClient:
 
     def series_categories(self):
         return self.api("get_series_categories")
+
+    def vod_streams(self, category_id: str):
+        return self.api("get_vod_streams", category_id=category_id)
+
+    def series_streams(self, category_id: str):
+        return self.api("get_series", category_id=category_id)
+
+    def series_info(self, series_id: str):
+        return self.api("get_series_info", series_id=series_id)

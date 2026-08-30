@@ -19,10 +19,10 @@ jobs:
       - name: Instalar dependencias
         run: pip install -r requirements.txt
 
-      - name: Probar conexión y selección central
+      - name: Probar descubrimiento de catálogo
         env:
           PYTHONPATH: ${{ github.workspace }}
           XTREAM_HOST: ${{ secrets.XTREAM_HOST }}
           XTREAM_USERNAME: ${{ secrets.XTREAM_USERNAME }}
           XTREAM_PASSWORD: ${{ secrets.XTREAM_PASSWORD }}
-        run: python scripts/test_xtream.py
+        run: python scripts/test_catalog_sample.py
