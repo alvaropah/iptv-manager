@@ -1,39 +1,11 @@
 <!doctype html>
 <html lang="es">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#090b10">
-  <title>IPTV Manager — Preview</title>
-  <link rel="stylesheet" href="style.css">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0f1014"><title>IPTV Manager — Biblioteca</title><link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="topbar">
-    <button class="mobile-menu" id="mobileMenu" aria-label="Abrir menú">☰</button>
-    <a class="brand" href="#" aria-label="IPTV Manager">IPTV <span>MANAGER</span></a>
-    <div class="search-wrap">
-      <span class="search-icon">⌕</span>
-      <input id="search" type="search" placeholder="Buscar en tu biblioteca…" autocomplete="off" aria-label="Buscar">
-      <button id="searchBtn">Buscar</button>
-    </div>
-    <div class="health ok"><i></i><span>Preview · catálogo real</span></div>
-  </header>
-  <div class="layout">
-    <aside class="sidebar" id="sidebar">
-      <div class="nav-section-label">BIBLIOTECA</div>
-      <nav>
-        <button class="nav active" data-view="home"><span>⌂</span> Inicio</button>
-        <button class="nav" data-view="movies"><span>▣</span> Películas</button>
-        <button class="nav" data-view="series"><span>▤</span> Series</button>
-        <button class="nav" data-view="categories"><span>▦</span> Categorías</button>
-      </nav>
-      <div class="sidebar-bottom">
-        <div class="side-status"><i></i><div><strong>Preview temporal</strong><small>Datos reales, sin URLs de reproducción</small></div></div>
-        <div class="version-label">IPTV Manager <span>v0.5.1 preview</span></div>
-      </div>
-    </aside>
-    <main id="main" class="main"><div class="loading"><span class="spinner"></span>Cargando preview…</div></main>
-  </div>
-  <script src="app.js"></script>
-</body>
-</html>
+<header class="topbar"><button class="mobile-menu" id="mobileMenu">☰</button><a class="brand" href="#">IPTV <b>MANAGER</b></a><nav class="topnav"><button class="active" data-view="home">Inicio</button><button data-view="movies">Películas</button><button data-view="series">Series</button><button data-view="categories">Categorías</button></nav><div class="search"><span>⌕</span><input id="search" placeholder="Buscar películas y series…"><button id="searchBtn">Buscar</button></div></header>
+<main id="main"><div class="loading">Cargando catálogo real…</div></main>
+<script src="app.js"></script>
+</body></html>
