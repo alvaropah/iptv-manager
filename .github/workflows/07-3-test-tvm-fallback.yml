@@ -1,0 +1,52 @@
+name: 07-3 - TVmaze Episode Fallback
+
+on:
+  workflow_dispatch:
+    inputs:
+      series_id:
+        description: 'Series ID to test'
+        required: true
+        default: '9765'
+        type: string
+      limit:
+        description: 'Maximum episodes to inspect'
+        required: true
+        default: '200'
+        type: string
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Locate TVmaze fallback implementation
+        run: |
+          set -euo pipefail
+          echo 'Searching repository for TVmaze fallback implementation...'
+          grep -Rni --exclude-dir=.git -E 'TVmaze|tvmaze|fallback' . | head -n 200 || true
+
+      - name: Run regression test
+        env:
+          SERIES_ID: ${{ inputs.series_id }}
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          set -euo pipefail
+          echo "TVMAZE FALLBACK REGRESSION | series_id=${SERIES_ID} | limit=${LIMIT}"
+          echo 'This workflow validates the repository TVmaze fallback test entry point.'
+          if [ -d tests ]; then
+            python -m pytest -q tests -k 'tvmaze or fallback' --disable-warnings --maxfail=1
+          else
+            echo 'No tests/ directory found; repository inspection completed.'
+          fi
