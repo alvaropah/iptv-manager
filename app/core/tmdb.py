@@ -39,5 +39,11 @@ class TMDBClient:
     def tv(self, external_id: int) -> dict:
         return self._get(f"/tv/{external_id}", append_to_response="credits,images", include_image_language="es,null")
 
+    def alternative_titles(self, external_id: int, content_type: str) -> list[str]:
+        path = f"/movie/{external_id}/alternative_titles" if content_type == "movie" else f"/tv/{external_id}/alternative_titles"
+        data = self._get(path)
+        items = data.get("titles") or data.get("results") or []
+        return [x.get("title") for x in items if x.get("title")]
+
     def episode(self, series_id: int, season: int, episode: int) -> dict:
         return self._get(f"/tv/{series_id}/season/{season}/episode/{episode}", append_to_response="credits,images", include_image_language="es,null")
