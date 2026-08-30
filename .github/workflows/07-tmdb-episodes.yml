@@ -52,10 +52,10 @@ jobs:
           if integrity!='ok' or missing: sys.exit(1)
           PY
           }
-          for run in $(gh run list --workflow 03-1-sync-persistent.yml --status success --limit 10 --json databaseId --jq '.[].databaseId'); do
+          for run in $(gh run list --workflow 07-tmdb-episodes.yml --status success --limit 10 --json databaseId --jq '.[].databaseId'); do
             rm -rf candidates/*
-            echo "Probando catálogo persistente: $run"
-            if gh run download "$run" --name iptv-manager-v031-catalog --dir candidates >/dev/null 2>&1; then
+            echo "Probando enriquecimiento persistente: $run"
+            if gh run download "$run" --name iptv-manager-v070-enriched --dir candidates >/dev/null 2>&1; then
               db=$(find candidates -type f \( -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \) -print -quit || true)
               if [ -n "$db" ] && validate "$db"; then
                 cp "$db" data/iptv_manager.db
@@ -64,8 +64,35 @@ jobs:
               fi
             fi
           done
+          if [ "$found" -eq 0 ]; then
+            for run in $(gh run list --workflow 03-1-sync-persistent.yml --status success --limit 10 --json databaseId --jq '.[].databaseId'); do
+              rm -rf candidates/*
+              echo "Probando catálogo persistente: $run"
+              if gh run download "$run" --name iptv-manager-v031-catalog --dir candidates >/dev/null 2>&1; then
+                db=$(find candidates -type f \( -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \) -print -quit || true)
+                if [ -n "$db" ] && validate "$db"; then
+                  cp "$db" data/iptv_manager.db
+                  found=1
+                  break
+                fi
+              fi
+            done
+          fi
           test "$found" -eq 1
           echo "BD restaurada: $(du -h data/iptv_manager.db | cut -f1)"
+
+      - name: Inicializar esquema de metadata
+        env:
+          DATABASE_PATH: data/iptv_manager.db
+        run: |
+          python - <<'PY'
+          from app.db.database import connect
+          from app.db.metadata import init_metadata_db
+          with connect() as conn:
+              init_metadata_db(conn)
+              conn.commit()
+          print('METADATA SCHEMA | OK')
+          PY
 
       - name: Preflight episodios pendientes
         env:
@@ -126,3 +153,12 @@ jobs:
               print('ERROR: el enriquecimiento terminó sin generar metadata de episodios.')
               sys.exit(1)
           PY
+
+      - name: Persistir BD enriquecida
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iptv-manager-v070-enriched
+          path: data/iptv_manager.db
+          if-no-files-found: error
+          retention-days: 30
