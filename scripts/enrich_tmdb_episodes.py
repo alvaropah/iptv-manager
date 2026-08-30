@@ -43,27 +43,24 @@ def save_episode_metadata(conn, row, result):
          json.dumps(result, ensure_ascii=False), settings.tmdb_language),
     )
 
-    # external_id is globally unique per source in metadata_links. If TMDB has
-    # already assigned this ID to another provider episode, move the link to the
-    # current episode instead of failing the whole batch.
+    # Do not use ON CONFLICT(external_source, external_id): the current schema
+    # does not declare that pair as a UNIQUE constraint. Enforce the intended
+    # uniqueness explicitly so a duplicate TMDB episode link cannot remain.
+    conn.execute(
+        """DELETE FROM metadata_links
+           WHERE external_source='tmdb' AND external_id=?""",
+        (external_id,),
+    )
     conn.execute(
         """INSERT INTO metadata_links
         (episode_id,provider_title,external_source,external_id,match_status,match_score,matched_by,updated_at)
-        VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
-        ON CONFLICT(external_source, external_id) DO UPDATE SET
-          content_id=NULL,
-          episode_id=excluded.episode_id,
-          provider_title=excluded.provider_title,
-          match_status=excluded.match_status,
-          match_score=excluded.match_score,
-          matched_by=excluded.matched_by,
-          updated_at=CURRENT_TIMESTAMP""",
+        VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)""",
         (row["episode_id"], row["provider_title"], "tmdb", external_id, "matched", 1.0,
          "series_id+season_number+episode_number"),
     )
 
 
-def resolve_series_tmdb_id(conn, client: TMDBClient, series_id: int, cache: dict[int, str | None]) -> tuple[str | None, bool]:
+def resolve_series_tmdb_id(conn: object, client: TMDBClient, series_id: int, cache: dict[int, str | None]) -> tuple[str | None, bool]:
     """Return (TMDB series id, newly_resolved)."""
     if series_id in cache:
         return cache[series_id], False
