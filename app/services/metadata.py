@@ -6,14 +6,11 @@ from difflib import SequenceMatcher
 
 TECH_RE = re.compile(r"\b(?:4k|2160p|1080p|720p|4320p|hdr10\+?|dolby.?vision|dolby.?audio|dolby.?atmos|dual.?audio|multi.?subs?|espanol|castellano|latino|vose|web.?dl|web.?rip|bluray|blu.?ray|hdtv|remux|hevc|x264|x265|h264|h265|aac|ac3|dts|uhd|fhd|sd)\b", re.I)
 YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2})\b")
-# Known provider/platform prefixes. These are labels from the IPTV source, not part of the title.
 PROVIDER_PREFIX_RE = re.compile(
-    r"^(?:"
-    r"4k|8k|uhd|fhd|hd|amz|amazon|netflix|disney\+?|disney|apple\+?|apple|"
+    r"^(?:4k|8k|uhd|fhd|hd|amz|amazon|netflix|disney\+?|disney|apple\+?|apple|"
     r"hbo|max|paramount\+?|sky|osn\+?|peacock|showtime|prime\+?|prime|"
     r"crunchyroll|discovery\+?|discovery|vix(?:\s+premium)?|movistar|"
-    r"atresplayer|rtve|starz|hulu|viaplay|filmin|rakuten|nickelodeon|marvel"
-    r")\s*[-_:|]\s*",
+    r"atresplayer|rtve|starz|hulu|viaplay|filmin|rakuten|nickelodeon|marvel)\s*[-_:|]\s*",
     re.I,
 )
 
@@ -29,15 +26,12 @@ def normalize_title(value: str) -> str:
 
 
 def clean_provider_title(value: str) -> str:
-    """Return the likely real title from an IPTV/provider title."""
     value = (value or "").strip()
-    # Remove repeated provider labels, including combinations such as 4K-AMZ-.
     previous = None
     while value and value != previous:
         previous = value
         value = PROVIDER_PREFIX_RE.sub("", value).strip()
     value = TECH_RE.sub(" ", value)
-    # Remove a leading technical block even when it is not followed by a known provider.
     value = re.sub(r"^(?:(?:4k|8k|uhd|fhd|hd)\s*[-_:|]\s*)+", "", value, flags=re.I).strip()
     value = re.sub(r"[._]+", " ", value)
     value = re.sub(r"\s+", " ", value).strip(" -_:|")
@@ -52,12 +46,10 @@ def extract_year(title: str, year: int | None = None) -> int | None:
 
 
 def title_queries(provider_title: str, year: int | None = None, original_title: str | None = None) -> list[str]:
-    """Build ordered TMDB queries, preferring a clean title over provider metadata."""
     clean = clean_provider_title(provider_title)
     values = [clean]
     if original_title:
         values.append(clean_provider_title(original_title))
-    # Fallback only: useful for unusual providers whose prefix is unknown.
     if provider_title and provider_title.strip() != clean:
         values.append(provider_title.strip())
     out: list[str] = []
@@ -83,6 +75,7 @@ def score_candidate(provider_title: str, provider_year: int | None, candidate: d
     raw = normalize_title(provider_title)
     targets = [x for x in (clean, raw) if x]
     names = [candidate.get("title"), candidate.get("name"), candidate.get("original_title"), candidate.get("original_name")]
+    names.extend(candidate.get("alternative_titles") or [])
     normalized = [normalize_title(x) for x in names if x]
     best = max((_title_similarity(target, name) for target in targets for name in normalized), default=0.0)
     date = (candidate.get("release_date") or candidate.get("first_air_date") or "")[:4]
