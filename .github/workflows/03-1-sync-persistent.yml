@@ -3,33 +3,60 @@ name: "IPTV Manager v0.3.1 - Sincronización persistente"
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
-        with: {python-version: '3.12'}
-      - run: pip install -r requirements.txt
-      - name: Restaurar catalog.db anterior
-        uses: actions/download-artifact@v4
         with:
-          name: iptv-manager-catalog-db
-          path: data
-          merge-multiple: true
-        continue-on-error: true
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      - name: Recuperar BD de la última v0.3 completada
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          PREVIOUS_RUN_ID="$(gh run list --workflow 06-sync-catalog-v03.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId')"
+          if [ -z "$PREVIOUS_RUN_ID" ]; then
+            echo "No se encontró una ejecución v0.3 previa. Se iniciará una importación desde cero."
+            exit 0
+          fi
+          echo "Ejecución v0.3 encontrada: $PREVIOUS_RUN_ID"
+          echo "Descargando artifact: iptv-manager-v03-catalog"
+          gh run download "$PREVIOUS_RUN_ID" --name iptv-manager-v03-catalog --dir data
+          if [ -f data/iptv_manager.db ]; then
+            echo "BD restaurada correctamente: $(du -h data/iptv_manager.db | cut -f1)"
+          else
+            echo "ERROR: el artifact no contiene data/iptv_manager.db"
+            exit 1
+          fi
+
       - name: Sincronizar catálogo incremental
         env:
           PYTHONPATH: ${{ github.workspace }}
           XTREAM_HOST: ${{ secrets.XTREAM_HOST }}
           XTREAM_USERNAME: ${{ secrets.XTREAM_USERNAME }}
           XTREAM_PASSWORD: ${{ secrets.XTREAM_PASSWORD }}
+          DATABASE_PATH: data/iptv_manager.db
+          SYNC_WORKERS: "6"
         run: python scripts/sync_catalog.py
-      - name: Persistir catalog.db
-        if: always()
+
+      - name: Persistir BD para la siguiente ejecución
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: iptv-manager-catalog-db
-          path: data/catalog.db
-          if-no-files-found: warn
-          retention-days: 90
+          name: iptv-manager-v031-catalog
+          path: data/iptv_manager.db
+          if-no-files-found: error
+          retention-days: 30
