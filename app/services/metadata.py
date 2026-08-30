@@ -21,7 +21,6 @@ def normalize_title(value: str) -> str:
 
 
 def clean_provider_title(value: str) -> str:
-    """Remove provider/source prefixes and technical tags, preserving real title/year."""
     value = (value or "").strip()
     previous = None
     while value and value != previous:
@@ -51,7 +50,7 @@ def title_queries(provider_title: str, year: int | None = None, original_title: 
         values.append(provider_title.strip())
     out: list[str] = []
     for value in values:
-        value = re.sub(r"\b(19\d{2}|20\d{2})\b", " ", value)
+        value = YEAR_RE.sub(" ", value)
         value = re.sub(r"\(\s*\)|\[\s*\]", " ", value)
         value = re.sub(r"\s+", " ", value).strip(" -_:|()[]")
         if value and value not in out:
@@ -83,9 +82,10 @@ def _candidate_names(candidate: dict) -> list[str]:
 
 
 def score_candidate(provider_title: str, provider_year: int | None, candidate: dict) -> float:
-    clean = normalize_title(clean_provider_title(provider_title))
-    raw = normalize_title(provider_title)
-    targets = [x for x in (clean, raw) if x]
+    # Year is evaluated separately as evidence; it must not contaminate title similarity.
+    clean = YEAR_RE.sub(" ", clean_provider_title(provider_title))
+    raw = YEAR_RE.sub(" ", provider_title or "")
+    targets = [normalize_title(x) for x in (clean, raw) if x]
     normalized = [normalize_title(x) for x in _candidate_names(candidate)]
     best = max((_title_similarity(target, name) for target in targets for name in normalized), default=0.0)
     date = (candidate.get("release_date") or candidate.get("first_air_date") or "")[:4]
