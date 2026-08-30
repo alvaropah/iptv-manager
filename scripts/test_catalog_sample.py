@@ -6,7 +6,7 @@ import sys
 from app.core.config import settings
 from app.core.normalization import normalize_category_name
 from app.core.xtream import XtreamClient
-from app.config_loader import load_config
+from app.core.catalog_config import load_catalog_selection
 
 
 def category_map(items):
@@ -26,7 +26,7 @@ def main() -> int:
     print("IPTV MANAGER — PRUEBA 3: DESCUBRIMIENTO DE CATÁLOGO")
     print("=" * 72)
 
-    cfg = load_config()
+    cfg = load_catalog_selection()
     client = XtreamClient(
         settings.xtream_host,
         settings.xtream_username,
