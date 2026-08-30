@@ -3,27 +3,42 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#090b10">
   <title>IPTV Manager</title>
   <link rel="stylesheet" href="/ui/style.css">
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="/ui/">IPTV <span>MANAGER</span></a>
-    <div class="search-wrap"><input id="search" type="search" placeholder="Buscar películas o series…" autocomplete="off"><button id="searchBtn">Buscar</button></div>
-    <div id="health" class="health">● conectando</div>
+    <button class="mobile-menu" id="mobileMenu" aria-label="Abrir menú">☰</button>
+    <a class="brand" href="/ui/" aria-label="IPTV Manager">IPTV <span>MANAGER</span></a>
+    <div class="search-wrap">
+      <span class="search-icon">⌕</span>
+      <input id="search" type="search" placeholder="Buscar en tu biblioteca…" autocomplete="off" aria-label="Buscar">
+      <button id="searchBtn">Buscar</button>
+    </div>
+    <div id="health" class="health"><i></i><span>Conectando</span></div>
   </header>
+
   <div class="layout">
-    <aside class="sidebar">
+    <aside class="sidebar" id="sidebar">
+      <div class="nav-section-label">BIBLIOTECA</div>
       <nav>
-        <button class="nav active" data-view="home">⌂ Inicio</button>
-        <button class="nav" data-view="movies">🎬 Películas</button>
-        <button class="nav" data-view="series">📺 Series</button>
-        <button class="nav" data-view="categories">▦ Categorías</button>
+        <button class="nav active" data-view="home"><span>⌂</span> Inicio</button>
+        <button class="nav" data-view="movies"><span>▣</span> Películas</button>
+        <button class="nav" data-view="series"><span>▤</span> Series</button>
+        <button class="nav" data-view="categories"><span>▦</span> Categorías</button>
       </nav>
-      <div class="side-note">Catálogo servido desde la BD local. Xtream solo interviene en la sincronización.</div>
+      <div class="sidebar-bottom">
+        <div class="side-status"><i></i><div><strong>Catálogo local</strong><small>La navegación no consulta Xtream</small></div></div>
+        <div class="version-label">IPTV Manager <span>v0.5.1</span></div>
+      </div>
     </aside>
-    <main id="main" class="main"><div class="loading">Cargando catálogo…</div></main>
+
+    <main id="main" class="main">
+      <div class="loading"><span class="spinner"></span>Cargando biblioteca…</div>
+    </main>
   </div>
+
   <script src="/ui/app.js"></script>
 </body>
 </html>
