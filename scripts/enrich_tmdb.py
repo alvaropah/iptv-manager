@@ -47,24 +47,28 @@ def save_metadata(conn, row, result, score, status):
       (row["id"], "tmdb", tmdb_id, title, original, result.get("overview"), year, runtime, json.dumps(genres, ensure_ascii=False), ", ".join(x for x in directors if x), json.dumps(creators, ensure_ascii=False), json.dumps(cast, ensure_ascii=False), poster, backdrop, result.get("vote_average"), json.dumps(result, ensure_ascii=False), settings.tmdb_language))
 
 
-def search_candidates(client, content_type, query, year):
-    """Search in Spanish first, then English so titles whose TMDB display name is non-Latin are recoverable."""
+def search_candidates(client: TMDBClient, content_type: str, query: str, year: int | None) -> list[dict]:
+    """Search all relevant languages and year modes, merging candidates by TMDB id."""
     search = client.search_movie if content_type == "movie" else client.search_tv
-    candidates = []
-    seen = set()
-    # Spanish is preferred because it gives us Spanish-facing metadata.
-    for language in (settings.tmdb_language, "en-US"):
+    merged: dict[int, dict] = {}
+    languages = []
+    for language in (settings.tmdb_language or "es-ES", "en-US"):
+        if language not in languages:
+            languages.append(language)
+    for language in languages:
+        # Always run both year-filtered and unfiltered searches. A localized search
+        # can return an unrelated title before the English/original title appears.
         for use_year in (True, False):
-            found = search(query, year if use_year else None, language=language)
+            try:
+                found = search(query, year if use_year else None, language=language)
+            except Exception as exc:
+                print(f"    TMDB search warning | language={language} | year_filter={use_year} | {exc}")
+                continue
             for item in found:
-                if item.get("id") not in seen:
-                    candidates.append(item)
-                    seen.add(item.get("id"))
-            if found:
-                # Keep the remaining language as a fallback, but don't hammer the API
-                # with a year/no-year pair once a good result set exists.
-                break
-    return candidates
+                item_id = item.get("id")
+                if item_id is not None:
+                    merged[int(item_id)] = item
+    return list(merged.values())
 
 
 def main():
@@ -108,7 +112,6 @@ def main():
                 elif status == "review": review += 1
                 else: rejected += 1
                 display = detail.get("title") or detail.get("name") or "?"
-                lang = "en-US" if candidate in [] else ""
                 print(f"[{index}/{len(rows)}] {status.upper()} | {row['canonical_title']} -> {display} | score={score:.2f} | query={query_used}")
                 if index % 10 == 0:
                     conn.commit()
