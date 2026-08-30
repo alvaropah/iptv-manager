@@ -5,6 +5,8 @@ import os
 import sqlite3
 from pathlib import Path
 
+import requests
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -17,7 +19,25 @@ def main() -> None:
     if not token:
         raise RuntimeError("TMDB_API_TOKEN no está disponible para validar el enriquecimiento")
 
+    # Primero distinguimos un problema de credenciales de un problema del catálogo.
+    try:
+        response = requests.get(
+            "https://api.themoviedb.org/3/movie/550",
+            headers={"Authorization": f"Bearer {token}", "accept": "application/json"},
+            params={"language": "es-ES"},
+            timeout=30,
+        )
+        response.raise_for_status()
+    except Exception as exc:
+        raise RuntimeError(
+            f"TMDB no acepta TMDB_API_TOKEN: {type(exc).__name__}: {exc}. "
+            "Debe ser el 'API Read Access Token' de TMDB, no otro tipo de credencial."
+        ) from exc
+
     with sqlite3.connect(db_path) as conn:
+        active_content = conn.execute(
+            "SELECT COUNT(*) FROM content WHERE is_active=1"
+        ).fetchone()[0]
         links = conn.execute(
             "SELECT COUNT(*) FROM metadata_links WHERE external_source='tmdb'"
         ).fetchone()[0]
@@ -38,10 +58,9 @@ def main() -> None:
         ).fetchone()[0]
         rich = conn.execute(
             """
-            SELECT COUNT(*)
-            FROM content_metadata
+            SELECT COUNT(*) FROM content_metadata
             WHERE source='tmdb'
-              AND (overview IS NOT NULL AND trim(overview) <> '')
+              AND overview IS NOT NULL AND trim(overview) <> ''
               AND (poster_url IS NOT NULL OR backdrop_url IS NOT NULL)
             """
         ).fetchone()[0]
@@ -57,8 +76,19 @@ def main() -> None:
             """
         ).fetchone()
 
+    print(f"Contenido activo en BD: {active_content}")
+    print(f"TMDB links: {links} | matched: {matched} | review: {review} | rejected: {rejected}")
+
+    if active_content == 0:
+        raise RuntimeError(
+            "La BD restaurada no contiene ningún contenido activo. "
+            "El problema está en la sincronización/restauración del catálogo, no en TMDB."
+        )
     if links == 0:
-        raise RuntimeError("TMDB no ha creado ningún metadata_link")
+        raise RuntimeError(
+            "TMDB está autenticado pero el enriquecimiento no creó metadata_links. "
+            "Revisa el log del paso 'Enriquecimiento TMDB opcional' para ver si las búsquedas devuelven 0 candidatos o si hay errores al consultar detalles."
+        )
     if matched == 0:
         raise RuntimeError(
             f"TMDB no ha producido ningún match válido (links={links}, review={review}, rejected={rejected})"
@@ -70,12 +100,9 @@ def main() -> None:
     if rich == 0:
         raise RuntimeError("No hay ningún registro TMDB con sinopsis e imagen")
 
-    print("IPTV MANAGER — v0.6: TMDB ENRICHMENT")
-    print(f"TMDB links: {links}")
-    print(f"matched: {matched} | review: {review} | rejected: {rejected}")
-    print(f"content_metadata: {metadata}")
-    print(f"metadata en español: {spanish}")
-    print(f"registros ricos (sinopsis + imagen): {rich}")
+    print("content_metadata:", metadata)
+    print("metadata en español:", spanish)
+    print("registros ricos (sinopsis + imagen):", rich)
     if sample:
         provider_title, tmdb_title, year, rating, director, creators, cast = sample
         cast_count = len(json.loads(cast)) if cast else 0
