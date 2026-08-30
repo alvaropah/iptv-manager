@@ -1,0 +1,85 @@
+name: 07-2 - TMDB Episode Fallback Regression
+
+on:
+  push:
+    paths:
+      - 'scripts/enrich_tmdb_episodes.py'
+      - 'app/services/metadata.py'
+      - '.github/workflows/07-2-tmdb-fallback-regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+
+      - name: Restore persistent DB
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf data candidates
+          mkdir -p data candidates
+          found=0
+          validate() {
+            DB="$1" python - <<'PY'
+          import os, sqlite3, sys
+          db=os.environ['DB']
+          required={'providers','categories','content','seasons','episodes','versions','streams','series_sources'}
+          with sqlite3.connect(db) as con:
+              integrity=con.execute('PRAGMA integrity_check').fetchone()[0]
+              tables={r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+          missing=required-tables
+          print(f'integrity_check={integrity}; missing={sorted(missing)}')
+          if integrity!='ok' or missing: sys.exit(1)
+          PY
+          }
+          for run in $(gh run list --workflow 07-tmdb-episodes.yml --status success --limit 10 --json databaseId --jq '.[].databaseId'); do
+            rm -rf candidates/*
+            if gh run download "$run" --name iptv-manager-v070-enriched --dir candidates >/dev/null 2>&1; then
+              db=$(find candidates -type f \( -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \) -print -quit || true)
+              if [ -n "$db" ] && validate "$db"; then cp "$db" data/iptv_manager.db; found=1; break; fi
+            fi
+          done
+          if [ "$found" -eq 0 ]; then
+            for run in $(gh run list --workflow 03-1-sync-persistent.yml --status success --limit 10 --json databaseId --jq '.[].databaseId'); do
+              rm -rf candidates/*
+              if gh run download "$run" --name iptv-manager-v031-catalog --dir candidates >/dev/null 2>&1; then
+                db=$(find candidates -type f \( -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \) -print -quit || true)
+                if [ -n "$db" ] && validate "$db"; then cp "$db" data/iptv_manager.db; found=1; break; fi
+              fi
+            done
+          fi
+          test "$found" -eq 1
+
+      - name: Init metadata schema
+        env:
+          DATABASE_PATH: data/iptv_manager.db
+        run: |
+          python - <<'PY'
+          from app.db.database import connect
+          from app.db.metadata import init_metadata_db
+          with connect() as conn:
+              init_metadata_db(conn)
+              conn.commit()
+          PY
+
+      - name: Run Arpo regression
+        env:
+          TMDB_API_TOKEN: ${{ secrets.TMDB_API_TOKEN }}
+          TMDB_LANGUAGE: es-ES
+          DATABASE_PATH: data/iptv_manager.db
+        run: |
+          set -euo pipefail
+          python scripts/enrich_tmdb_episodes.py --series-id 9765 --limit 200 --refresh --diagnostic
