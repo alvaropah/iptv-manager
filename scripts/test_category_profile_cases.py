@@ -2,7 +2,7 @@ from app.core.category_profiles import infer_category_profile
 
 
 CASES = {
-    "ESPAÑA SERIES ⁴ᴷ ᴴᴰᴿ ᴰᴼᴸᴮʸ ⱽᴵˢᴵÓᴺ": {
+    "ESPAÑA SERIES ⁴ᴷ ᴴᴰᴿ ᴰᴼᴸᴮʸ ⱽᴵˢᴵᴼᴺ": {
         "quality": "4K", "resolution": "2160p",
         "dynamic_range": "Dolby Vision", "language_hint": "es",
     },

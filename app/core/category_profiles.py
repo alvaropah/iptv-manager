@@ -16,9 +16,34 @@ class CategoryProfile:
 
 
 def _fold(value: str) -> str:
-    value = unicodedata.normalize("NFKC", value or "")
+    """Normalize provider's normal and Unicode-styled lettering."""
+    value = unicodedata.normalize("NFKD", value or "")
+    # Some provider category names use modifier/phonetic Unicode letters
+    # that NFKD leaves behind (e.g. ɪ in stylized Dolby Vision).
+    value = value.translate(str.maketrans({
+        "ɪ": "i",
+        "ʏ": "y",
+        "ʀ": "r",
+        "ʙ": "b",
+        "ʟ": "l",
+        "ᴅ": "d",
+        "ᴏ": "o",
+        "ᴌ": "l",
+        "ᴇ": "e",
+        "ᴍ": "m",
+        "ᴠ": "v",
+        "ᴵ": "I",
+        "ᶦ": "i",
+        "ᵒ": "o",
+        "ˡ": "l",
+        "ᵇ": "b",
+        "ʸ": "y",
+        "ⁱ": "i",
+        "ⁿ": "n",
+    }))
     value = value.casefold()
-    return re.sub(r"\s+", " ", value).strip()
+    value = re.sub(r"\s+", " ", value).strip()
+    return value
 
 
 def infer_category_profile(category_name: str) -> CategoryProfile:
@@ -28,7 +53,6 @@ def infer_category_profile(category_name: str) -> CategoryProfile:
     quality = resolution = dynamic_range = audio = language_hint = None
     subtitles = None
 
-    # Explicit quality signals.
     if re.search(r"\b8k\b", n):
         quality, resolution = "8K", "4320p"
     elif re.search(r"\b4k\b|3840p", n):
@@ -39,20 +63,17 @@ def infer_category_profile(category_name: str) -> CategoryProfile:
         quality, resolution = "720p", "720p"
 
     # Dolby Vision is more specific than generic HDR, so it wins.
-    if "dolby vision" in n or "dolby ⱽᶦˢᶦᵒⁿ" in category_name.casefold():
+    if "dolby vision" in n:
         dynamic_range = "Dolby Vision"
-    elif re.search(r"\bhdr\b", n) or "ᴴᴰᴿ" in category_name:
+    elif re.search(r"\bhdr\b", n):
         dynamic_range = "HDR"
 
-    # Dolby Audio.
-    if "dolby audio" in n or "ᴰᴼᴸᴮʸ ᴬᵁᴰᴵᴼ" in category_name:
+    if "dolby audio" in n:
         audio = "Dolby Audio"
 
-    # Explicit subtitle markers, including MULTI-SUBS.
     if re.search(r"\bsubtitles?\b|\bsubtitled\b|\bsubs\b", n):
         subtitles = True
 
-    # Language is only a hint. ES- prefixed categories are also a Spanish hint.
     if re.search(r"^es\s*[-–—]", n) or re.search(r"\bespaña\b", n):
         language_hint = "es"
     elif re.search(r"\benglish\b|\beng(?:-|$)", n):
