@@ -67,6 +67,33 @@ jobs:
           test "$found" -eq 1
           echo "BD restaurada: $(du -h data/iptv_manager.db | cut -f1)"
 
+      - name: Preflight episodios pendientes
+        env:
+          DATABASE_PATH: data/iptv_manager.db
+        run: |
+          python - <<'PY'
+          import sqlite3, os, sys
+          db=os.environ['DATABASE_PATH']
+          limit=int(os.environ.get('INPUT_LIMIT', '200'))
+          with sqlite3.connect(db) as con:
+              active=con.execute('SELECT COUNT(*) FROM episodes WHERE is_active=1').fetchone()[0]
+              pending=con.execute('''
+                  SELECT COUNT(*)
+                  FROM episodes e
+                  JOIN seasons s ON s.id=e.season_id
+                  JOIN content c ON c.id=s.series_id
+                  LEFT JOIN episode_metadata em ON em.episode_id=e.id
+                  WHERE e.is_active=1 AND c.is_active=1 AND em.episode_id IS NULL
+              ''').fetchone()[0]
+          print(f'PREFLIGHT | active_episodes={active} | pending_episodes={pending} | batch_limit={limit}')
+          if active > 0 and pending == 0:
+              print('No hay episodios pendientes: el enriquecimiento ya está completo.')
+          elif active > 0 and pending < 1:
+              sys.exit(1)
+          PY
+        env:
+          INPUT_LIMIT: ${{ inputs.limit }}
+
       - name: Enrich TMDB episodes
         env:
           TMDB_API_TOKEN: ${{ secrets.TMDB_API_TOKEN }}
@@ -79,15 +106,26 @@ jobs:
           DATABASE_PATH: data/iptv_manager.db
         run: python scripts/test_v070_episodes.py
 
-      - name: Resumen BD
+      - name: Resumen BD y guardia de enriquecimiento
         env:
           DATABASE_PATH: data/iptv_manager.db
         run: |
           python - <<'PY'
-          import sqlite3, os
+          import sqlite3, os, sys
           db=os.environ['DATABASE_PATH']
           with sqlite3.connect(db) as con:
               episodes=con.execute('SELECT COUNT(*) FROM episodes WHERE is_active=1').fetchone()[0]
               metadata=con.execute('SELECT COUNT(*) FROM episode_metadata').fetchone()[0]
-          print(f'CATALOGO | active_episodes={episodes} | episode_metadata={metadata}')
+              pending=con.execute('''
+                  SELECT COUNT(*)
+                  FROM episodes e
+                  JOIN seasons s ON s.id=e.season_id
+                  JOIN content c ON c.id=s.series_id
+                  LEFT JOIN episode_metadata em ON em.episode_id=e.id
+                  WHERE e.is_active=1 AND c.is_active=1 AND em.episode_id IS NULL
+              ''').fetchone()[0]
+          print(f'CATALOGO | active_episodes={episodes} | episode_metadata={metadata} | pending={pending}')
+          if episodes > 0 and metadata == 0 and pending > 0:
+              print('ERROR: el enriquecimiento terminó sin generar metadata de episodios.')
+              sys.exit(1)
           PY
