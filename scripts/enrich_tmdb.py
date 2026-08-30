@@ -37,7 +37,7 @@ def save_metadata(conn, row, result, score, status):
     conn.execute("""INSERT INTO metadata_links(content_id,provider_title,external_source,external_id,match_status,match_score,matched_by,updated_at)
       VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
       ON CONFLICT(content_id,external_source) DO UPDATE SET provider_title=excluded.provider_title,external_id=excluded.external_id,match_status=excluded.match_status,match_score=excluded.match_score,matched_by=excluded.matched_by,updated_at=CURRENT_TIMESTAMP""",
-      (row["id"], row["canonical_title"], "tmdb", tmdb_id, status, score, "clean_title+year+multilang"))
+      (row["id"], row["canonical_title"], "tmdb", tmdb_id, status, score, "clean_title+year+multilang+alternative_titles"))
     if status != "matched":
         return
     runtime = result.get("runtime") if is_movie else ((result.get("episode_run_time") or [None])[0])
@@ -56,8 +56,6 @@ def search_candidates(client: TMDBClient, content_type: str, query: str, year: i
         if language not in languages:
             languages.append(language)
     for language in languages:
-        # Always run both year-filtered and unfiltered searches. A localized search
-        # can return an unrelated title before the English/original title appears.
         for use_year in (True, False):
             try:
                 found = search(query, year if use_year else None, language=language)
@@ -69,6 +67,21 @@ def search_candidates(client: TMDBClient, content_type: str, query: str, year: i
                 if item_id is not None:
                     merged[int(item_id)] = item
     return list(merged.values())
+
+
+def rank_candidates(client: TMDBClient, content_type: str, provider_title: str, year: int | None, candidates: list[dict]):
+    ranked = []
+    for candidate in candidates:
+        score = score_candidate(provider_title, year, candidate)
+        if score < 0.86:
+            try:
+                alternatives = client.alternative_titles(candidate["id"], content_type)
+                candidate = {**candidate, "alternative_titles": alternatives}
+                score = score_candidate(provider_title, year, candidate)
+            except Exception:
+                pass
+        ranked.append((score, candidate))
+    return sorted(ranked, key=lambda x: x[0], reverse=True)
 
 
 def main():
@@ -103,7 +116,7 @@ def main():
                     no_candidates += 1
                     print(f"[{index}/{len(rows)}] NO MATCH | proveedor={row['canonical_title']} | consulta={query_used}")
                     continue
-                ranked = sorted(((score_candidate(row["canonical_title"], year, c), c) for c in all_candidates), key=lambda x: x[0], reverse=True)
+                ranked = rank_candidates(client, row["content_type"], row["canonical_title"], year, all_candidates)
                 score, candidate = ranked[0]
                 status = classify_match(score)
                 detail = client.movie(candidate["id"]) if row["content_type"] == "movie" else client.tv(candidate["id"])
