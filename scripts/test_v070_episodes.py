@@ -10,6 +10,31 @@ if str(ROOT) not in sys.path:
 
 from app.db.metadata import init_metadata_db
 from app.db.repository import get_episode, get_series_seasons
+from app.services.metadata import classify_match, score_candidate
+
+
+def test_provider_suffix_matching():
+    candidate = {
+        'id': 123,
+        'name': 'Arpo',
+        'original_name': 'Arpo',
+        'first_air_date': '2019-10-29',
+        'origin_country': ['US'],
+    }
+    score = score_candidate('AMZ - Arpo (2022) (PT)', 2022, candidate, 'PT')
+    assert score >= 0.96, score
+    assert classify_match(score) == 'matched'
+
+
+def test_wrong_installment_still_rejected():
+    candidate = {
+        'id': 456,
+        'name': 'Example Show 2',
+        'original_name': 'Example Show 2',
+        'first_air_date': '2022-01-01',
+    }
+    score = score_candidate('Example Show 1', 2022, candidate)
+    assert score < 0.62, score
 
 
 def main():
@@ -38,7 +63,9 @@ def main():
     assert row[1] == 'Sinopsis TMDB'
     assert row[2].endswith('/still.jpg')
     assert row[3] == 45
-    print('OK | episode_metadata contract')
+    test_provider_suffix_matching()
+    test_wrong_installment_still_rejected()
+    print('OK | episode_metadata contract | provider suffix matching')
 
 
 if __name__ == '__main__':
