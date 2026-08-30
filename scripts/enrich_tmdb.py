@@ -49,17 +49,17 @@ def save_metadata(conn, row, result, score, status):
 
 def search_candidates(client: TMDBClient, content_type: str, query: str, year: int | None) -> list[dict]:
     search = client.search_movie if content_type == "movie" else client.search_tv
-    merged: dict[int, dict] = {}
     languages = []
     for language in (settings.tmdb_language or "es-ES", "en-US"):
         if language not in languages:
             languages.append(language)
+    merged: dict[int, dict] = {}
     for language in languages:
         for use_year in (True, False):
             try:
                 found = search(query, year if use_year else None, language=language)
             except Exception as exc:
-                print(f"    TMDB search warning | language={language} | year_filter={use_year} | {exc}")
+                print(f"    TMDB search warning | language={language} | year_filter={use_year} | {exc}", flush=True)
                 continue
             for item in found:
                 item_id = item.get("id")
@@ -77,20 +77,27 @@ def search_candidates(client: TMDBClient, content_type: str, query: str, year: i
 
 
 def rank_candidates(client: TMDBClient, content_type: str, provider_title: str, year: int | None, candidates: list[dict], diagnostic: bool = False):
+    # First rank locally. Alternative-title requests are expensive and must not
+    # be made for every low-scoring search result.
+    preliminary = sorted(
+        ((score_candidate(provider_title, year, candidate), candidate) for candidate in candidates),
+        key=lambda x: x[0],
+        reverse=True,
+    )
     ranked = []
-    for candidate in candidates:
-        score = score_candidate(provider_title, year, candidate)
+    for base_score, candidate in preliminary[:5]:
+        score = base_score
         if score < 0.86:
             try:
                 alternatives = client.alternative_titles_multilang(candidate["id"], content_type)
                 candidate = {**candidate, "alternative_titles": alternatives}
                 score = score_candidate(provider_title, year, candidate)
             except Exception as exc:
-                print(f"    alternative title warning | id={candidate.get('id')} | {exc}")
+                print(f"    alternative title warning | id={candidate.get('id')} | {exc}", flush=True)
         if diagnostic:
             names = [candidate.get(k) for k in ("title", "name", "original_title", "original_name") if candidate.get(k)]
             names += list(candidate.get("_locale_variants") or [])
-            print(f"    CANDIDATE | id={candidate.get('id')} | score={score:.2f} | titles={names}")
+            print(f"    CANDIDATE | id={candidate.get('id')} | score={score:.2f} | titles={names}", flush=True)
         ranked.append((score, candidate))
     return sorted(ranked, key=lambda x: x[0], reverse=True)
 
@@ -126,7 +133,7 @@ def main():
                         break
                 if not all_candidates:
                     no_candidates += 1
-                    print(f"[{index}/{len(rows)}] NO MATCH | proveedor={row['canonical_title']} | consulta={query_used}")
+                    print(f"[{index}/{len(rows)}] NO MATCH | proveedor={row['canonical_title']} | consulta={query_used}", flush=True)
                     continue
                 ranked = rank_candidates(client, row["content_type"], row["canonical_title"], year, all_candidates, args.diagnostic)
                 score, candidate = ranked[0]
@@ -137,15 +144,15 @@ def main():
                 elif status == "review": review += 1
                 else: rejected += 1
                 display = detail.get("title") or detail.get("name") or "?"
-                print(f"[{index}/{len(rows)}] {status.upper()} | {row['canonical_title']} -> {display} | score={score:.2f} | query={query_used}")
+                print(f"[{index}/{len(rows)}] {status.upper()} | {row['canonical_title']} -> {display} | score={score:.2f} | query={query_used}", flush=True)
                 if index % 10 == 0:
                     conn.commit()
                 time.sleep(0.05)
             except Exception as exc:
                 errors += 1
-                print(f"[{index}/{len(rows)}] ERROR | content={row['id']} | {exc}")
+                print(f"[{index}/{len(rows)}] ERROR | content={row['id']} | {exc}", flush=True)
         conn.commit()
-        print(f"RESUMEN | matched={matched} review={review} rejected={rejected} no_candidates={no_candidates} errors={errors}")
+        print(f"RESUMEN | matched={matched} review={review} rejected={rejected} no_candidates={no_candidates} errors={errors}", flush=True)
 
 
 if __name__ == "__main__":
