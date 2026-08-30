@@ -1,37 +1,34 @@
 # Arquitectura
 
-## Core
+## Fuente de verdad de selección
 
-El núcleo será responsable de autenticación, sincronización, normalización,
-identificación estable, snapshots y detección de cambios.
+`config.yml` es la fuente de verdad de qué contenido VOD entra en el sistema.
+Contiene las categorías de series y películas seleccionadas manualmente.
 
-## Base de datos
+El proveedor puede tener cientos o miles de categorías adicionales; no entran en
+el catálogo por existir en Xtream.
 
-SQLite se utiliza inicialmente para el prototipo. Antes de desplegarlo de forma
-permanente decidiremos si conviene mantenerlo o migrar a PostgreSQL.
+```text
+Xtream
+  |
+  +--> LIVE ----------------------> TV (independiente)
+  |
+  +--> VOD/SERIES --> config.yml -> Core -> catálogo VOD
+                                  |
+                                  +-> películas
+                                  +-> series -> temporadas -> episodios
+                                  +-> versiones -> streams
+```
 
-## Middleware
+## Componentes
 
-Generará playlists derivadas del catálogo, por ejemplo:
+- `config.yml`: selección manual de categorías.
+- `app/core/catalog_config.py`: carga, valida y expone esa selección.
+- `app/core/xtream.py`: cliente Xtream.
+- `app/db`: persistencia.
+- `app/services`: sincronización futura.
+- `app/web`: API/interfaz futura.
 
-- completa
-- solo TV
-- solo películas
-- solo series
-- perfiles personalizados
-
-## Estadísticas
-
-Utilizarán el historial de sincronizaciones y snapshots.
-
-## Novedades
-
-Compararán snapshots y las fechas `first_seen_at` / `last_seen_at`.
-
-## Buscador
-
-Consultarará la base de datos local y no hará una llamada a Xtream por cada búsqueda.
-
-## Telegram
-
-Será otra interfaz sobre el mismo Core.
+Todas las funciones posteriores (middleware, estadísticas, novedades, buscador y
+Telegram) consumirán el catálogo filtrado por esta selección, no el catálogo
+completo del proveedor.
