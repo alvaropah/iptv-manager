@@ -16,7 +16,7 @@ from app.core.config import settings
 from app.core.tmdb import TMDBClient
 from app.db.database import connect, init_db
 from app.db.metadata import init_metadata_db
-from app.services.metadata import classify_match, extract_year, title_queries
+from app.services.metadata import classify_match, extract_country, extract_year, title_queries
 from scripts.enrich_tmdb import rank_candidates, save_metadata, search_candidates
 
 
@@ -24,9 +24,6 @@ def save_episode_metadata(conn, row, result):
     external_id = str(result["id"])
     still_path = result.get("still_path")
     still_url = f"https://image.tmdb.org/t/p/w780{still_path}" if still_path else None
-
-    # Replace the episode's TMDB metadata atomically. This makes reruns safe and
-    # avoids stale links when an episode was previously matched to another ID.
     conn.execute("DELETE FROM metadata_links WHERE episode_id=? AND external_source='tmdb'", (row["episode_id"],))
     conn.execute(
         """INSERT INTO episode_metadata
@@ -42,15 +39,7 @@ def save_episode_metadata(conn, row, result):
          result.get("air_date"), result.get("runtime"), still_url,
          json.dumps(result, ensure_ascii=False), settings.tmdb_language),
     )
-
-    # Do not use ON CONFLICT(external_source, external_id): the current schema
-    # does not declare that pair as a UNIQUE constraint. Enforce the intended
-    # uniqueness explicitly so a duplicate TMDB episode link cannot remain.
-    conn.execute(
-        """DELETE FROM metadata_links
-           WHERE external_source='tmdb' AND external_id=?""",
-        (external_id,),
-    )
+    conn.execute("""DELETE FROM metadata_links WHERE external_source='tmdb' AND external_id=?""", (external_id,))
     conn.execute(
         """INSERT INTO metadata_links
         (episode_id,provider_title,external_source,external_id,match_status,match_score,matched_by,updated_at)
@@ -93,6 +82,7 @@ def resolve_series_tmdb_id(conn: object, client: TMDBClient, series_id: int, cac
         return None, True
 
     year = extract_year(row["canonical_title"], row["year"])
+    country = extract_country(row["canonical_title"])
     queries = title_queries(row["canonical_title"], year, row["original_title"])
     candidates: list[dict] = []
     query_used = None
@@ -107,11 +97,11 @@ def resolve_series_tmdb_id(conn: object, client: TMDBClient, series_id: int, cac
         cache[series_id] = None
         return None, True
 
-    ranked = rank_candidates(client, "series", row["canonical_title"], year, candidates)
+    ranked = rank_candidates(client, "series", row["canonical_title"], year, candidates, country)
     score, candidate = ranked[0]
     status = classify_match(score)
     if status != "matched":
-        print(f"    SERIES {status.upper()} | {row['canonical_title']} | score={score:.2f} | query={query_used}", flush=True)
+        print(f"    SERIES {status.upper()} | {row['canonical_title']} | score={score:.2f} | country={country or '?'} | query={query_used}", flush=True)
         cache[series_id] = None
         return None, True
 
@@ -144,7 +134,6 @@ def main():
     with connect() as conn:
         init_metadata_db(conn)
         conn.commit()
-
         client = TMDBClient(token, settings.tmdb_language)
         where = "e.is_active=1 AND c.is_active=1"
         if not args.refresh:
@@ -171,41 +160,30 @@ def main():
                         series_resolved += 1
                     else:
                         series_unresolved += 1
-
                 if not tmdb_series_id:
                     pending += 1
                     print(f"[{index}/{len(rows)}] PENDING | {row['provider_title']} | serie_id={row['series_id']} | sin TMDB series", flush=True)
                     continue
-
                 try:
                     result = client.episode(int(tmdb_series_id), int(row["season_number"]), int(row["episode_number"]))
                 except requests.HTTPError as exc:
                     status = _http_status(exc)
                     if status == 404:
                         pending += 1
-                        print(
-                            f"[{index}/{len(rows)}] PENDING | {row['provider_title']} | "
-                            f"TMDB episode inexistente S{row['season_number']:02d}E{row['episode_number']:02d} | "
-                            f"tmdb_series={tmdb_series_id}",
-                            flush=True,
-                        )
+                        print(f"[{index}/{len(rows)}] PENDING | {row['provider_title']} | TMDB episode inexistente S{row['season_number']:02d}E{row['episode_number']:02d} | tmdb_series={tmdb_series_id}", flush=True)
                         conn.rollback()
                         continue
                     raise
-
                 save_episode_metadata(conn, row, result)
                 conn.commit()
                 matched += 1
                 print(f"[{index}/{len(rows)}] MATCHED | {row['provider_title']} -> {result.get('name') or '?'} | S{row['season_number']:02d}E{row['episode_number']:02d} | tmdb_series={tmdb_series_id}", flush=True)
             except Exception as exc:
-                # Never leave a failed write transaction open: one bad episode
-                # must not poison subsequent rows in the same 200-item batch.
                 conn.rollback()
                 errors += 1
                 status = _http_status(exc)
                 detail = f"HTTP {status}" if status else f"{type(exc).__name__}: {exc}"
                 print(f"[{index}/{len(rows)}] ERROR | episode={row['episode_id']} | {detail}", flush=True)
-
         print(f"RESUMEN | matched={matched} errors={errors} pending={pending} series_resolved={series_resolved} series_unresolved={series_unresolved}", flush=True)
 
 
