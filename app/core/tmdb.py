@@ -9,14 +9,16 @@ class TMDBClient:
     def __init__(self, token: str, language: str = "es-ES") -> None:
         self.token = token
         self.language = language
+        self.session = requests.Session()
+        self.timeout = (5, 10)
 
     def _get(self, path: str, language: str | None = None, **params):
         selected_language = language or self.language
-        r = requests.get(
+        r = self.session.get(
             f"{BASE_URL}{path}",
             params={"language": selected_language, **params},
             headers={"Authorization": f"Bearer {self.token}", "accept": "application/json"},
-            timeout=30,
+            timeout=self.timeout,
         )
         r.raise_for_status()
         return r.json()
