@@ -14,7 +14,8 @@ from app.core.config import settings
 from app.core.tmdb import TMDBClient
 from app.db.database import connect, init_db
 from app.db.metadata import init_metadata_db
-from app.services.metadata import classify_match, extract_year, rank_candidates, save_metadata, search_candidates, title_queries
+from app.services.metadata import classify_match, extract_year, title_queries
+from scripts.enrich_tmdb import rank_candidates, save_metadata, search_candidates
 
 
 def save_episode_metadata(conn, row, result):
@@ -43,6 +44,7 @@ def save_episode_metadata(conn, row, result):
         (episode_id,provider_title,external_source,external_id,match_status,match_score,matched_by,updated_at)
         VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
         ON CONFLICT(external_source, external_id) DO UPDATE SET
+          content_id=NULL,
           episode_id=excluded.episode_id,
           provider_title=excluded.provider_title,
           match_status=excluded.match_status,
@@ -54,15 +56,17 @@ def save_episode_metadata(conn, row, result):
     )
 
 
-def resolve_series_tmdb_id(conn, client: TMDBClient, series_id: int, cache: dict[int, str | None]) -> str | None:
-    """Return the TMDB series id, resolving the series when the catalog lacks it.
+def resolve_series_tmdb_id(conn, client: TMDBClient, series_id: int, cache: dict[int, str | None]) -> tuple[str | None, bool]:
+    """Return (TMDB series id, newly_resolved).
 
     The persistent catalog is deliberately independent from the metadata workflow.
-    Therefore episode enrichment cannot require content_metadata to already exist:
-    that was the reason the previous implementation selected zero episodes.
+    Therefore episode enrichment cannot require content_metadata to already exist.
+    If the series has no TMDB identity yet, reuse the same v0.6.9 matching engine
+    used by the movie/series metadata workflow and persist the result before looking
+    up any episode.
     """
     if series_id in cache:
-        return cache[series_id]
+        return cache[series_id], False
 
     existing = conn.execute(
         "SELECT external_id FROM content_metadata WHERE content_id=? AND source='tmdb'",
@@ -70,7 +74,7 @@ def resolve_series_tmdb_id(conn, client: TMDBClient, series_id: int, cache: dict
     ).fetchone()
     if existing and existing["external_id"]:
         cache[series_id] = str(existing["external_id"])
-        return cache[series_id]
+        return cache[series_id], False
 
     linked = conn.execute(
         """SELECT external_id FROM metadata_links
@@ -80,7 +84,7 @@ def resolve_series_tmdb_id(conn, client: TMDBClient, series_id: int, cache: dict
     ).fetchone()
     if linked and linked["external_id"]:
         cache[series_id] = str(linked["external_id"])
-        return cache[series_id]
+        return cache[series_id], False
 
     row = conn.execute(
         """SELECT id,content_type,canonical_title,original_title,year
@@ -89,7 +93,7 @@ def resolve_series_tmdb_id(conn, client: TMDBClient, series_id: int, cache: dict
     ).fetchone()
     if not row:
         cache[series_id] = None
-        return None
+        return None, True
 
     year = extract_year(row["canonical_title"], row["year"])
     queries = title_queries(row["canonical_title"], year, row["original_title"])
@@ -104,7 +108,7 @@ def resolve_series_tmdb_id(conn, client: TMDBClient, series_id: int, cache: dict
     if not candidates:
         print(f"    SERIES NO MATCH | {row['canonical_title']} | query={query_used}", flush=True)
         cache[series_id] = None
-        return None
+        return None, True
 
     ranked = rank_candidates(client, "series", row["canonical_title"], year, candidates)
     score, candidate = ranked[0]
@@ -112,7 +116,7 @@ def resolve_series_tmdb_id(conn, client: TMDBClient, series_id: int, cache: dict
     if status != "matched":
         print(f"    SERIES {status.upper()} | {row['canonical_title']} | score={score:.2f} | query={query_used}", flush=True)
         cache[series_id] = None
-        return None
+        return None, True
 
     detail = client.tv(candidate["id"])
     save_metadata(conn, row, detail, score, status)
@@ -120,7 +124,7 @@ def resolve_series_tmdb_id(conn, client: TMDBClient, series_id: int, cache: dict
     tmdb_id = str(detail["id"])
     cache[series_id] = tmdb_id
     print(f"    SERIES MATCHED | {row['canonical_title']} -> {detail.get('name') or '?'} | score={score:.2f} | tmdb={tmdb_id}", flush=True)
-    return tmdb_id
+    return tmdb_id, True
 
 
 def main():
@@ -153,20 +157,22 @@ def main():
                 ORDER BY e.id LIMIT ?""", (args.limit,),
         ).fetchall()
 
-        matched = errors = pending = series_matches = series_unresolved = 0
+        matched = errors = pending = series_resolved = series_unresolved = 0
         series_cache: dict[int, str | None] = {}
 
         for index, row in enumerate(rows, 1):
             try:
-                tmdb_series_id = resolve_series_tmdb_id(conn, client, int(row["series_id"]), series_cache)
+                tmdb_series_id, newly_resolved = resolve_series_tmdb_id(conn, client, int(row["series_id"]), series_cache)
+                if newly_resolved:
+                    if tmdb_series_id:
+                        series_resolved += 1
+                    else:
+                        series_unresolved += 1
+
                 if not tmdb_series_id:
                     pending += 1
                     print(f"[{index}/{len(rows)}] PENDING | {row['provider_title']} | serie_id={row['series_id']} | sin TMDB series", flush=True)
                     continue
-
-                if int(row["series_id"]) not in series_cache or series_cache[int(row["series_id"])] == tmdb_series_id:
-                    if sum(1 for value in series_cache.values() if value == tmdb_series_id) == 1:
-                        series_matches += 1
 
                 result = client.episode(int(tmdb_series_id), int(row["season_number"]), int(row["episode_number"]))
                 save_episode_metadata(conn, row, result)
@@ -177,7 +183,7 @@ def main():
                 errors += 1
                 print(f"[{index}/{len(rows)}] ERROR | episode={row['episode_id']} | {exc}", flush=True)
 
-        print(f"RESUMEN | matched={matched} errors={errors} pending={pending} series_resolved={series_matches} series_unresolved={series_unresolved}", flush=True)
+        print(f"RESUMEN | matched={matched} errors={errors} pending={pending} series_resolved={series_resolved} series_unresolved={series_unresolved}", flush=True)
 
 
 if __name__ == "__main__":
