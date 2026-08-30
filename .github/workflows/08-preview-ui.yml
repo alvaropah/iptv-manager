@@ -1,0 +1,106 @@
+name: 08 - Preview web temporal
+run-name: Preview UI sobre catálogo real
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  pages: write
+  id-token: write
+
+jobs:
+  build-preview:
+    name: Generar preview con catálogo real
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Restaurar BD persistente compatible
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf data candidates
+          mkdir -p data candidates
+          found=0
+
+          validate() {
+            local db="$1"
+            DB="$db" python - <<'PY'
+          import os, sqlite3, sys
+          db=os.environ['DB']
+          required={'providers','categories','content','seasons','episodes','versions','streams','content_categories','stream_categories','series_sources','sync_runs','change_events','sync_state'}
+          with sqlite3.connect(db) as con:
+              integrity=con.execute('PRAGMA integrity_check').fetchone()[0]
+              tables={r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+          missing=required-tables
+          print(f'integrity_check={integrity}; missing={sorted(missing)}')
+          if integrity!='ok' or missing: sys.exit(1)
+          PY
+          }
+
+          for run in $(gh run list --workflow 03-1-sync-persistent.yml --status success --limit 10 --json databaseId --jq '.[].databaseId'); do
+            rm -rf candidates/*
+            echo "Probando catálogo persistente: $run"
+            if gh run download "$run" --name iptv-manager-v031-catalog --dir candidates >/dev/null 2>&1; then
+              db=$(find candidates -type f \( -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \) -print -quit || true)
+              if [ -n "$db" ] && validate "$db"; then
+                cp "$db" data/iptv_manager.db
+                found=1
+                break
+              fi
+            fi
+          done
+
+          if [ "$found" -ne 1 ]; then
+            echo 'No se encontró BD persistente compatible.'
+            exit 1
+          fi
+          rm -rf candidates
+          echo "BD restaurada: $(du -h data/iptv_manager.db | cut -f1)"
+
+      - name: Generar datos públicos de preview
+        env:
+          DATABASE_PATH: data/iptv_manager.db
+        run: python scripts/build_ui_preview.py
+
+      - name: Preparar sitio
+        run: |
+          rm -rf site
+          mkdir -p site
+          cp preview/index.html site/index.html
+          cp preview/app.js site/app.js
+          cp app/web/style.css site/style.css
+          cp preview/preview-data.json site/preview-data.json
+
+      - name: Configurar GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Subir artefacto Pages
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+      - name: Publicar preview
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: URL de preview
+        run: echo "Preview publicada en ${{ steps.deployment.outputs.page_url }}"
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
