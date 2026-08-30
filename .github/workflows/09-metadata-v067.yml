@@ -46,11 +46,13 @@ jobs:
           done
           test -s data/iptv_manager.db
           echo "BD restaurada: $(du -h data/iptv_manager.db | cut -f1)"
+      - name: Pruebas deterministas v0.6.7
+        run: python scripts/test_v067_matching.py
       - name: Validar arquitectura v0.6.7
         run: python scripts/test_v06_metadata.py
       - name: Enriquecimiento TMDB v0.6.7 — muestra ampliada
         if: ${{ env.TMDB_API_TOKEN != '' }}
-        run: python scripts/enrich_tmdb.py --limit ${{ inputs.limit }} --diagnostic
+        run: python scripts/enrich_tmdb.py --limit ${{ inputs.limit }}
       - name: Validar resultados TMDB v0.6.7
         if: ${{ env.TMDB_API_TOKEN != '' }}
         run: python scripts/test_tmdb_enrichment.py
