@@ -6,13 +6,7 @@ from difflib import SequenceMatcher
 
 TECH_RE = re.compile(r"\b(?:4k|2160p|1080p|720p|4320p|hdr10\+?|dolby.?vision|dolby.?audio|dolby.?atmos|dual.?audio|multi.?subs?|espanol|castellano|latino|vose|web.?dl|web.?rip|bluray|blu.?ray|hdtv|remux|hevc|x264|x265|h264|h265|aac|ac3|dts|uhd|fhd|sd)\b", re.I)
 YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2})\b")
-PROVIDER_PREFIX_RE = re.compile(
-    r"^(?:4k|8k|uhd|fhd|hd|amz|amazon|netflix|disney\+?|disney|apple\+?|apple|"
-    r"hbo|max|paramount\+?|sky|osn\+?|peacock|showtime|prime\+?|prime|"
-    r"crunchyroll|discovery\+?|discovery|vix(?:\s+premium)?|movistar|"
-    r"atresplayer|rtve|starz|hulu|viaplay|filmin|rakuten|nickelodeon|marvel)\s*[-_:|]\s*",
-    re.I,
-)
+PROVIDER_PREFIX_RE = re.compile(r"^(?:4k|8k|uhd|fhd|hd|amz|amazon|netflix|disney\+?|disney|apple\+?|apple|hbo|max|paramount\+?|sky|osn\+?|peacock|showtime|prime\+?|prime|crunchyroll|discovery\+?|discovery|vix(?:\s+premium)?|movistar|atresplayer|rtve|starz|hulu|viaplay|filmin|rakuten|nickelodeon|marvel)\s*[-_:|]\s*", re.I)
 
 
 def normalize_title(value: str) -> str:
@@ -33,9 +27,8 @@ def clean_provider_title(value: str) -> str:
     while value and value != previous:
         previous = value
         value = PROVIDER_PREFIX_RE.sub("", value).strip()
-    # Technical tags are removed, but meaningful parentheses (e.g. the year)
-    # are deliberately preserved for callers/tests that need the cleaned title.
-    value = re.sub(r"\b(?:4k|8k|uhd|fhd|hd)\b\s*[-_:|]\s*", "", value, flags=re.I)
+    value = TECH_RE.sub(" ", value)
+    value = re.sub(r"^(?:(?:4k|8k|uhd|fhd|hd)\s*[-_:|]\s*)+", "", value, flags=re.I).strip()
     value = re.sub(r"\[[^\]]*\]", " ", value)
     value = re.sub(r"[._]+", " ", value)
     value = re.sub(r"\s+", " ", value).strip(" -_:|")
@@ -77,6 +70,7 @@ def _title_similarity(a: str, b: str) -> float:
 
 def _candidate_names(candidate: dict) -> list[str]:
     names = [candidate.get("title"), candidate.get("name"), candidate.get("original_title"), candidate.get("original_name")]
+    names.extend(candidate.get("_locale_variants", []))
     alternatives = candidate.get("alternative_titles") or []
     if isinstance(alternatives, dict):
         alternatives = alternatives.get("titles") or alternatives.get("results") or []
