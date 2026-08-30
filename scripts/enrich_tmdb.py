@@ -63,16 +63,16 @@ def search_candidates(client: TMDBClient, content_type: str, query: str, year: i
                 continue
             for item in found:
                 item_id = item.get("id")
-                if item_id is not None:
-                    current = merged.get(int(item_id), {})
-                    # Preserve title/name variants returned by different locales.
-                    merged[int(item_id)] = {**current, **item}
-                    for key in ("title", "name", "original_title", "original_name"):
-                        if item.get(key) and item.get(key) != current.get(key):
-                            variants = current.get("_locale_variants", [])
-                            if item[key] not in variants:
-                                variants.append(item[key])
-                            merged[int(item_id)]["_locale_variants"] = variants
+                if item_id is None:
+                    continue
+                key = int(item_id)
+                current = merged.get(key, {})
+                variants = list(current.get("_locale_variants", []))
+                for field in ("title", "name", "original_title", "original_name"):
+                    value = item.get(field)
+                    if value and value not in variants:
+                        variants.append(value)
+                merged[key] = {**current, **item, "_locale_variants": variants}
     return list(merged.values())
 
 
@@ -82,7 +82,7 @@ def rank_candidates(client: TMDBClient, content_type: str, provider_title: str, 
         score = score_candidate(provider_title, year, candidate)
         if score < 0.86:
             try:
-                alternatives = client.alternative_titles(candidate["id"], content_type)
+                alternatives = client.alternative_titles_multilang(candidate["id"], content_type)
                 candidate = {**candidate, "alternative_titles": alternatives}
                 score = score_candidate(provider_title, year, candidate)
             except Exception as exc:
