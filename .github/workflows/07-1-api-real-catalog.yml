@@ -1,0 +1,66 @@
+name: "07.1 - API sobre catálogo real v0.4.1"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  api-real:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Recuperar última BD persistida
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p data
+
+          echo "Buscando última ejecución exitosa de v0.3.1..."
+          RUN_ID="$(gh run list --workflow 03-1-sync-persistent.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+
+          if [ -n "$RUN_ID" ]; then
+            echo "Ejecución v0.3.1 encontrada: $RUN_ID"
+            if gh run download "$RUN_ID" --name iptv-manager-v031-catalog --dir data; then
+              echo "Artifact v0.3.1 descargado."
+            else
+              echo "No se pudo descargar el artifact v0.3.1; se intentará fallback v0.3."
+            fi
+          else
+            echo "No se encontró una ejecución v0.3.1 exitosa."
+          fi
+
+          if [ ! -f data/iptv_manager.db ]; then
+            echo "Buscando última ejecución exitosa de v0.3..."
+            RUN_ID="$(gh run list --workflow 06-sync-catalog-v03.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+            if [ -z "$RUN_ID" ]; then
+              echo "ERROR: no se encontró una BD persistida de v0.3/v0.3.1."
+              exit 1
+            fi
+            echo "Ejecución v0.3 encontrada: $RUN_ID"
+            gh run download "$RUN_ID" --name iptv-manager-v03-catalog --dir data
+          fi
+
+          test -f data/iptv_manager.db
+          echo "BD restaurada: $(du -h data/iptv_manager.db | cut -f1)"
+
+      - name: Ejecutar validación API sobre catálogo real
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          DATABASE_PATH: data/iptv_manager.db
+        run: python scripts/test_api_real.py
