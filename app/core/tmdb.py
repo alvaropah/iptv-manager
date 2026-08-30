@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 import requests
 
 BASE_URL = "https://api.themoviedb.org/3"
@@ -10,18 +12,45 @@ class TMDBClient:
         self.token = token
         self.language = language
         self.session = requests.Session()
-        self.timeout = (5, 10)
+        self.timeout = (5, 15)
+        self.max_retries = 3
 
     def _get(self, path: str, language: str | None = None, **params):
         selected_language = language or self.language
-        r = self.session.get(
-            f"{BASE_URL}{path}",
-            params={"language": selected_language, **params},
-            headers={"Authorization": f"Bearer {self.token}", "accept": "application/json"},
-            timeout=self.timeout,
-        )
-        r.raise_for_status()
-        return r.json()
+        request_params = {"language": selected_language, **params}
+        last_error: requests.RequestException | None = None
+
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                r = self.session.get(
+                    f"{BASE_URL}{path}",
+                    params=request_params,
+                    headers={"Authorization": f"Bearer {self.token}", "accept": "application/json"},
+                    timeout=self.timeout,
+                )
+                # A missing episode is an expected negative lookup. Do not retry it.
+                if r.status_code == 404:
+                    r.raise_for_status()
+                # Rate limiting/transient failures are retried with backoff.
+                if r.status_code == 429 and attempt < self.max_retries:
+                    retry_after = r.headers.get("Retry-After")
+                    try:
+                        delay = min(float(retry_after), 10.0) if retry_after else 2 ** (attempt - 1)
+                    except ValueError:
+                        delay = 2 ** (attempt - 1)
+                    time.sleep(delay)
+                    continue
+                r.raise_for_status()
+                return r.json()
+            except requests.RequestException as exc:
+                last_error = exc
+                status = getattr(exc.response, "status_code", None)
+                if status == 404 or attempt >= self.max_retries:
+                    raise
+                time.sleep(2 ** (attempt - 1))
+
+        assert last_error is not None
+        raise last_error
 
     def search_movie(self, title: str, year: int | None = None, language: str | None = None) -> list[dict]:
         params = {"query": title}
@@ -62,4 +91,9 @@ class TMDBClient:
         return out
 
     def episode(self, series_id: int, season: int, episode: int, language: str | None = None) -> dict:
-        return self._get(f"/tv/{series_id}/season/{season}/episode/{episode}", language=language, append_to_response="credits,images", include_image_language="es,null")
+        return self._get(
+            f"/tv/{series_id}/season/{season}/episode/{episode}",
+            language=language,
+            append_to_response="credits,images",
+            include_image_language="es,null",
+        )
