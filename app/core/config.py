@@ -14,6 +14,8 @@ class Settings:
     database_path: str = os.getenv("DATABASE_PATH", "data/iptv_manager.db")
     app_host: str = os.getenv("APP_HOST", "127.0.0.1")
     app_port: int = int(os.getenv("APP_PORT", "8000"))
+    tmdb_api_token: str = os.getenv("TMDB_API_TOKEN", "").strip()
+    tmdb_language: str = os.getenv("TMDB_LANGUAGE", "es-ES").strip() or "es-ES"
 
 
 settings = Settings()
