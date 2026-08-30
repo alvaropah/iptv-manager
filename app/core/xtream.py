@@ -20,7 +20,7 @@ class XtreamClient:
         self.timeout = timeout
 
         self.session = requests.Session()
-        self.session.headers.update({"User-Agent": "IPTV-Manager/0.1"})
+        self.session.headers.update({"User-Agent": "IPTV-Manager/0.3"})
 
     def api(self, action: str | None = None, **extra_params) -> Any:
         params = {"username": self.username, "password": self.password}

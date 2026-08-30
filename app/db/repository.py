@@ -1,48 +1,30 @@
 from __future__ import annotations
 
-import re
-
 from app.db.database import connect
-
-
-def normalize_name(value: str) -> str:
-    value = value.casefold()
-    return re.sub(r"\s+", " ", value).strip()
 
 
 def get_stats() -> dict:
     with connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT content_type, COUNT(*) AS total
-            FROM catalog_items
-            GROUP BY content_type
-            ORDER BY content_type
-            """
-        ).fetchall()
-
-        categories = conn.execute(
-            "SELECT COUNT(*) AS total FROM categories"
-        ).fetchone()["total"]
-
-    result = {row["content_type"]: row["total"] for row in rows}
-    result["categories"] = categories
-    return result
+        counts = {
+            "movies": conn.execute("SELECT COUNT(*) FROM content WHERE content_type='movie'").fetchone()[0],
+            "series": conn.execute("SELECT COUNT(*) FROM content WHERE content_type='series'").fetchone()[0],
+            "seasons": conn.execute("SELECT COUNT(*) FROM seasons").fetchone()[0],
+            "episodes": conn.execute("SELECT COUNT(*) FROM episodes").fetchone()[0],
+            "versions": conn.execute("SELECT COUNT(*) FROM versions").fetchone()[0],
+            "streams": conn.execute("SELECT COUNT(*) FROM streams WHERE is_active=1").fetchone()[0],
+            "categories": conn.execute("SELECT COUNT(*) FROM categories WHERE selected=1").fetchone()[0],
+        }
+        return counts
 
 
 def search_catalog(query: str, limit: int = 50) -> list[dict]:
-    q = f"%{normalize_name(query)}%"
-
+    q = f"%{query.casefold().strip()}%"
     with connect() as conn:
         rows = conn.execute(
-            """
-            SELECT id, content_type, category_id, name, year, poster_url
-            FROM catalog_items
-            WHERE normalized_name LIKE ?
-            ORDER BY normalized_name ASC
-            LIMIT ?
-            """,
+            """SELECT id, content_type, canonical_title AS name, year, poster_url
+               FROM content
+               WHERE is_active=1 AND normalized_title LIKE ?
+               ORDER BY normalized_title LIMIT ?""",
             (q, limit),
         ).fetchall()
-
     return [dict(row) for row in rows]

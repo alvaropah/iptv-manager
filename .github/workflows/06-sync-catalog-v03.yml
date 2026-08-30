@@ -1,0 +1,40 @@
+name: "IPTV Manager v0.3 - Sincronizar catálogo"
+
+on:
+  workflow_dispatch:
+  # La programación se activará cuando terminemos de validar la primera
+  # importación. Por ahora se ejecuta manualmente para no hacer una importación
+  # masiva accidental.
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      - name: Sincronizar catálogo v0.3
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          XTREAM_HOST: ${{ secrets.XTREAM_HOST }}
+          XTREAM_USERNAME: ${{ secrets.XTREAM_USERNAME }}
+          XTREAM_PASSWORD: ${{ secrets.XTREAM_PASSWORD }}
+          DATABASE_PATH: data/iptv_manager.db
+          SYNC_WORKERS: "6"
+        run: python scripts/sync_catalog.py
+
+      - name: Guardar base de datos como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: iptv-manager-v03-catalog
+          path: data/iptv_manager.db
+          retention-days: 7

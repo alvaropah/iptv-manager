@@ -1,34 +1,26 @@
-# Arquitectura
+# IPTV Manager v0.3 — Arquitectura
 
-## Fuente de verdad de selección
+`config.yml` sigue siendo la fuente de verdad de selección. El proveedor puede
+contener muchas más categorías, pero solo las seleccionadas entran al Core.
 
-`config.yml` es la fuente de verdad de qué contenido VOD entra en el sistema.
-Contiene las categorías de series y películas seleccionadas manualmente.
+## Flujo
 
-El proveedor puede tener cientos o miles de categorías adicionales; no entran en
-el catálogo por existir en Xtream.
+Xtream → categorías seleccionadas → identidad → base de datos → API/interfaz
 
-```text
-Xtream
-  |
-  +--> LIVE ----------------------> TV (independiente)
-  |
-  +--> VOD/SERIES --> config.yml -> Core -> catálogo VOD
-                                  |
-                                  +-> películas
-                                  +-> series -> temporadas -> episodios
-                                  +-> versiones -> streams
-```
+## Modelo
 
-## Componentes
+- Contenido: película o serie.
+- Versión: procedencia/categoría + señales técnicas.
+- Stream: entrada reproducible concreta.
+- Series: temporada → episodio → versión → stream.
 
-- `config.yml`: selección manual de categorías.
-- `app/core/catalog_config.py`: carga, valida y expone esa selección.
-- `app/core/xtream.py`: cliente Xtream.
-- `app/db`: persistencia.
-- `app/services`: sincronización futura.
-- `app/web`: API/interfaz futura.
+## Rendimiento
 
-Todas las funciones posteriores (middleware, estadísticas, novedades, buscador y
-Telegram) consumirán el catálogo filtrado por esta selección, no el catálogo
-completo del proveedor.
+La primera sincronización consulta los detalles de las series necesarias y los
+procesa con un número limitado de workers concurrentes.
+
+En sincronizaciones posteriores se compara una huella de la entrada de serie.
+Si no ha cambiado, no se solicita `get_series_info` otra vez. Las nuevas o
+modificadas sí se consultan.
+
+Los streams desaparecidos se marcan como inactivos en lugar de borrarse.

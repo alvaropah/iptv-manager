@@ -1,41 +1,23 @@
 # Roadmap
 
-## Fase 1 — Core
-- [x] Estructura
-- [x] Configuración segura
-- [x] Cliente Xtream
-- [x] SQLite
-- [x] API mínima
-- [ ] Sincronización real
-- [x] Modelo de datos central
-- [ ] Snapshots
+## v0.3 — Core funcional
+- [x] Selección central desde `config.yml`
+- [x] Identidad de contenido
+- [x] Contenido / versiones / streams
+- [x] Temporadas / episodios
+- [x] Importación real
+- [x] Sincronización incremental
+- [x] Consultas de detalle concurrentes y limitadas
+- [x] Soft-delete de streams desaparecidos
+- [x] Historial básico de sincronización y cambios
+- [x] Base local persistente durante la ejecución
+- [ ] Persistencia compartida entre ejecuciones de GitHub
+- [ ] API de catálogo completa
 
-## Fase 2 — Middleware
-- [ ] Playlists
-- [ ] URLs estables
-- [ ] Perfiles de dispositivo
-
-## Fase 3 — Estadísticas
-- [ ] Dashboard
-- [ ] Histórico
-- [ ] Crecimiento
-
-## Fase 4 — Novedades
-- [ ] Películas
-- [ ] Series
-- [ ] Temporadas
-- [ ] Episodios
-- [ ] Eliminaciones
-
-## Fase 5 — Buscador
-- [ ] Películas
-- [ ] Series
-- [ ] Temporadas
-- [ ] Episodios
-- [ ] Filtros
-
-## Fase 6 — Telegram
-- [ ] /buscar
-- [ ] /novedades
-- [ ] /stats
-- [ ] /estado
+## Siguiente bloque
+- [ ] Interfaz web
+- [ ] Buscador
+- [ ] Detector de novedades
+- [ ] Estadísticas
+- [ ] Middleware / URLs estables
+- [ ] Telegram
