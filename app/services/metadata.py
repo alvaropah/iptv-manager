@@ -27,16 +27,18 @@ def normalize_title(value: str) -> str:
 
 
 def clean_provider_title(value: str) -> str:
+    """Remove provider/source prefixes and technical tags, preserving real title/year."""
     value = (value or "").strip()
     previous = None
     while value and value != previous:
         previous = value
         value = PROVIDER_PREFIX_RE.sub("", value).strip()
-    value = TECH_RE.sub(" ", value)
-    value = re.sub(r"^(?:(?:4k|8k|uhd|fhd|hd)\s*[-_:|]\s*)+", "", value, flags=re.I).strip()
+    # Technical tags are removed, but meaningful parentheses (e.g. the year)
+    # are deliberately preserved for callers/tests that need the cleaned title.
+    value = re.sub(r"\b(?:4k|8k|uhd|fhd|hd)\b\s*[-_:|]\s*", "", value, flags=re.I)
     value = re.sub(r"\[[^\]]*\]", " ", value)
     value = re.sub(r"[._]+", " ", value)
-    value = re.sub(r"\s+", " ", value).strip(" -_:|()")
+    value = re.sub(r"\s+", " ", value).strip(" -_:|")
     return value
 
 
@@ -97,8 +99,6 @@ def score_candidate(provider_title: str, provider_year: int | None, candidate: d
         if int(date) == provider_year:
             best = min(1.0, best + 0.18)
         elif best < 0.90:
-            # A conflicting provider year should reduce confidence, but never
-            # erase an exact/near-exact title match because provider years can be wrong.
             best = max(0.0, best - 0.10)
     return round(best, 4)
 
