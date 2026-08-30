@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
 from app.core.config import settings
 from app.core.tmdb import TMDBClient
 from app.db.database import connect
-from app.services.metadata import classify_match, extract_year, score_candidate, title_queries
+from app.services.metadata import classify_match, extract_country, extract_year, score_candidate, title_queries
 
 
 def save_metadata(conn, row, result, score, status):
@@ -76,11 +76,9 @@ def search_candidates(client: TMDBClient, content_type: str, query: str, year: i
     return list(merged.values())
 
 
-def rank_candidates(client: TMDBClient, content_type: str, provider_title: str, year: int | None, candidates: list[dict], diagnostic: bool = False):
-    # First rank locally. Alternative-title requests are expensive and must not
-    # be made for every low-scoring search result.
+def rank_candidates(client: TMDBClient, content_type: str, provider_title: str, year: int | None, candidates: list[dict], provider_country: str | None = None, diagnostic: bool = False):
     preliminary = sorted(
-        ((score_candidate(provider_title, year, candidate), candidate) for candidate in candidates),
+        ((score_candidate(provider_title, year, candidate, provider_country), candidate) for candidate in candidates),
         key=lambda x: x[0],
         reverse=True,
     )
@@ -91,13 +89,13 @@ def rank_candidates(client: TMDBClient, content_type: str, provider_title: str, 
             try:
                 alternatives = client.alternative_titles_multilang(candidate["id"], content_type)
                 candidate = {**candidate, "alternative_titles": alternatives}
-                score = score_candidate(provider_title, year, candidate)
+                score = score_candidate(provider_title, year, candidate, provider_country)
             except Exception as exc:
                 print(f"    alternative title warning | id={candidate.get('id')} | {exc}", flush=True)
         if diagnostic:
             names = [candidate.get(k) for k in ("title", "name", "original_title", "original_name") if candidate.get(k)]
             names += list(candidate.get("_locale_variants") or [])
-            print(f"    CANDIDATE | id={candidate.get('id')} | score={score:.2f} | titles={names}", flush=True)
+            print(f"    CANDIDATE | id={candidate.get('id')} | score={score:.2f} | country={candidate.get('origin_country')} | titles={names}", flush=True)
         ranked.append((score, candidate))
     return sorted(ranked, key=lambda x: x[0], reverse=True)
 
@@ -123,6 +121,7 @@ def main():
         for index, row in enumerate(rows, 1):
             try:
                 year = extract_year(row["canonical_title"], row["year"])
+                country = extract_country(row["canonical_title"])
                 queries = title_queries(row["canonical_title"], year, row["original_title"])
                 all_candidates = []
                 query_used = None
@@ -135,7 +134,7 @@ def main():
                     no_candidates += 1
                     print(f"[{index}/{len(rows)}] NO MATCH | proveedor={row['canonical_title']} | consulta={query_used}", flush=True)
                     continue
-                ranked = rank_candidates(client, row["content_type"], row["canonical_title"], year, all_candidates, args.diagnostic)
+                ranked = rank_candidates(client, row["content_type"], row["canonical_title"], year, all_candidates, country, args.diagnostic)
                 score, candidate = ranked[0]
                 status = classify_match(score)
                 detail = client.movie(candidate["id"]) if row["content_type"] == "movie" else client.tv(candidate["id"])
