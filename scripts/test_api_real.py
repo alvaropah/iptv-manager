@@ -69,8 +69,20 @@ def main() -> None:
             """
         ).fetchone()
 
+        # Use the same normalized field that the API searches.
+        # canonical_title may legitimately contain a quality prefix such as
+        # "4K-", while normalized_title intentionally removes technical
+        # signals. Searching "4K-" would therefore be a bad test seed.
         search_seed_row = conn.execute(
-            "SELECT canonical_title FROM content WHERE is_active=1 ORDER BY id LIMIT 1"
+            """
+            SELECT normalized_title
+            FROM content
+            WHERE is_active=1
+              AND normalized_title IS NOT NULL
+              AND length(trim(normalized_title)) >= 3
+            ORDER BY id
+            LIMIT 1
+            """
         ).fetchone()
         search_seed = (search_seed_row[0] if search_seed_row else "")[:3]
 
