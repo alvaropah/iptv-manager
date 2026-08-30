@@ -1,15 +1,21 @@
 # Paso 5.1 — Episodios y versiones
 
-Esta prueba comprueba una relación crítica para el modelo de series:
+La prueba 5.1 no presupone que las categorías de versiones sean consecutivas.
 
-`Serie → versión → temporada → episodio`
+Recorre las categorías SERIES seleccionadas, identifica series presentes en
+múltiples categorías y selecciona una pareja especialmente útil, priorizando
+cuando una de las categorías aporta señales 4K y la otra no.
 
-Busca dos categorías seleccionadas consecutivas que compartan una serie,
-consulta ambas series y compara sus episodios por `temporada + episode_num`.
+Después consulta ambas `series_id` y compara los episodios mediante:
 
-Para cada episodio común muestra el ID del episodio y las señales de categoría
-de cada versión.
+`temporada + episode_num`
 
-También informa de episodios que solo aparecen en una de las dos versiones.
+Se informa de:
+- episodios presentes en ambas versiones;
+- episodios exclusivos de A;
+- episodios exclusivos de B;
+- IDs de episodio;
+- extensión;
+- señales técnicas heredadas de cada categoría.
 
 No se sincroniza el catálogo completo ni se modifica ninguna playlist.
