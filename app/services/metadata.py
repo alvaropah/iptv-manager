@@ -6,10 +6,8 @@ from difflib import SequenceMatcher
 
 TECH_RE = re.compile(r"\b(?:4k|2160p|1080p|720p|4320p|hdr10\+?|dolby.?vision|dolby.?audio|dolby.?atmos|dual.?audio|multi.?subs?|espanol|castellano|latino|vose|web.?dl|web.?rip|bluray|blu.?ray|hdtv|remux|hevc|x264|x265|h264|h265|aac|ac3|dts|uhd|fhd|sd)\b", re.I)
 YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2})\b")
-COUNTRY_SUFFIX_RE = re.compile(r"\s*\([A-Z]{2}\)\s*$")
+COUNTRY_SUFFIX_RE = re.compile(r"\s*\([A-Z]{2}\)\s*$", re.I)
 PROVIDER_PREFIX_RE = re.compile(r"^(?:4k|8k|uhd|fhd|hd|amz|amazon|netflix|disney\+?|disney|apple\+?|apple|hbo|max|paramount\+?|sky|osn\+?|peacock|showtime|prime\+?|prime|crunchyroll|discovery\+?|discovery|vix(?:\s+premium)?|movistar|atresplayer|rtve|starz|hulu|viaplay|filmin|rakuten|nickelodeon|marvel)\s*[-_:|]\s*", re.I)
-
-# Significant installment markers. These are identity evidence, not removable noise.
 INSTALLMENT_RE = re.compile(r"\b(?:vol(?:ume)?\.?\s*\d+|part\s*\d+|pt\.?\s*\d+|chapter\s*\d+|special\s*\d+|season\s*\d+|series\s*\d+)\b", re.I)
 SEQUEL_RE = re.compile(r"(?<!\w)(\d{1,2})(?!\w)")
 
@@ -48,10 +46,11 @@ def extract_year(title: str, year: int | None = None) -> int | None:
 def _clean_search_title(value: str) -> str:
     """Build a TMDB search title without provider/year/country packaging noise."""
     value = clean_provider_title(value)
+    # Strip the country suffix before removing the year so a feed title such as
+    # "Clarkson's Farm (2021) (GB)" can never leak the "(GB" fragment into TMDB.
+    value = COUNTRY_SUFFIX_RE.sub("", value).strip()
     value = YEAR_RE.sub(" ", value)
-    # Provider feeds commonly append the two-letter origin country after the year,
-    # e.g. "Clarkson's Farm (2021) (GB)". It is search metadata, not part of title.
-    value = COUNTRY_SUFFIX_RE.sub(" ", value)
+    # Remove empty packaging left by a removed year, including nested whitespace.
     value = re.sub(r"\(\s*\)|\[\s*\]", " ", value)
     value = re.sub(r"\s+", " ", value).strip(" -_:|()[]")
     return value
@@ -93,14 +92,12 @@ def _candidate_names(candidate: dict) -> list[str]:
 
 
 def _installment_signature(value: str) -> tuple[tuple[str, str], ...]:
-    """Extract meaningful installment markers so Vol. 2 cannot match Vol. 3."""
     text = normalize_title(value)
     markers: list[tuple[str, str]] = []
     for match in INSTALLMENT_RE.finditer(text):
         token = re.sub(r"\s+", "", match.group(0).casefold()).replace("volume", "vol")
         number = re.search(r"\d+", token)
         markers.append(("installment", f"{token}:{number.group(0) if number else ''}"))
-    # Standalone sequel numbers are meaningful only when they occur at the end of a title.
     end = re.search(r"(?:^|\s)(\d{1,2})$", text)
     if end:
         markers.append(("sequel", end.group(1)))
@@ -122,11 +119,8 @@ def score_candidate(provider_title: str, provider_year: int | None, candidate: d
     names = _candidate_names(candidate)
     normalized = [normalize_title(x) for x in names]
     best = max((_title_similarity(target, name) for target in targets for name in normalized), default=0.0)
-
-    # A conflicting volume/part/special/sequel number is strong evidence of a different title.
     if any(_marker_conflict(provider_title, name) for name in names):
         best = min(best, 0.35)
-
     date = (candidate.get("release_date") or candidate.get("first_air_date") or "")[:4]
     if provider_year and date.isdigit():
         if int(date) == provider_year:
