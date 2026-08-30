@@ -1,0 +1,169 @@
+name: 07.3 - UI sobre catálogo real v0.4.3
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  ui-real:
+    name: UI + API sobre catálogo real
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore compatible persistent database
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf data candidates
+          mkdir -p data candidates
+
+          validate_db() {
+            DB="$1" python - <<'PY'
+import os
+import sqlite3
+import sys
+
+db = os.environ["DB"]
+required = {
+    "content", "version", "stream", "season",
+    "episode", "episode_version", "episode_stream", "category"
+}
+
+try:
+    con = sqlite3.connect(db)
+    integrity = con.execute("PRAGMA integrity_check").fetchone()[0]
+    tables = {
+        row[0] for row in con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+    con.close()
+except Exception as exc:
+    print(f"Validation error: {exc}")
+    sys.exit(1)
+
+print("  tablas:", " ".join(sorted(tables)))
+print(f"  integrity_check: {integrity}")
+
+missing = required - tables
+if integrity != "ok" or missing:
+    if missing:
+        print("  faltan:", " ".join(sorted(missing)))
+    sys.exit(1)
+
+print("  esquema persistente compatible: OK")
+PY
+          }
+
+          find_db() {
+            find candidates -type f -name "*.db" -print -quit
+          }
+
+          try_artifact() {
+            local run_id="$1"
+            local artifact="$2"
+
+            rm -rf candidates/*
+            echo "  Descargando $artifact desde $run_id..."
+
+            if ! gh run download "$run_id" --name "$artifact" --dir candidates; then
+              echo "  Artifact no disponible."
+              return 1
+            fi
+
+            local db
+            db="$(find_db || true)"
+
+            if [ -z "$db" ]; then
+              echo "  No contiene ningún .db:"
+              find candidates -maxdepth 3 -type f -print || true
+              return 1
+            fi
+
+            echo "  BD candidata: $db ($(du -h "$db" | cut -f1))"
+
+            if validate_db "$db"; then
+              cp "$db" data/iptv_manager.db
+              return 0
+            fi
+
+            echo "  BD descartada: esquema incompatible."
+            return 1
+          }
+
+          FOUND=0
+
+          echo "Buscando BD compatible en v0.3.1..."
+          mapfile -t RUN_IDS < <(
+            gh run list \
+              --workflow 03-1-sync-persistent.yml \
+              --status success \
+              --limit 10 \
+              --json databaseId \
+              --jq '.[].databaseId'
+          )
+
+          for RUN_ID in "${RUN_IDS[@]}"; do
+            [ -n "$RUN_ID" ] || continue
+            echo "Probando v0.3.1: $RUN_ID"
+            if try_artifact "$RUN_ID" "iptv-manager-v031-catalog"; then
+              echo "BD compatible encontrada: v0.3.1 / $RUN_ID"
+              FOUND=1
+              break
+            fi
+          done
+
+          if [ "$FOUND" -eq 0 ]; then
+            echo "No se encontró BD compatible en v0.3.1."
+            echo "Buscando BD compatible en v0.3..."
+
+            mapfile -t RUN_IDS < <(
+              gh run list \
+                --workflow 06-sync-catalog-v03.yml \
+                --status success \
+                --limit 10 \
+                --json databaseId \
+                --jq '.[].databaseId'
+            )
+
+            for RUN_ID in "${RUN_IDS[@]}"; do
+              [ -n "$RUN_ID" ] || continue
+              echo "Probando v0.3: $RUN_ID"
+              if try_artifact "$RUN_ID" "iptv-manager-v03-catalog"; then
+                echo "BD compatible encontrada: v0.3 / $RUN_ID"
+                FOUND=1
+                break
+              fi
+            done
+          fi
+
+          if [ "$FOUND" -ne 1 ]; then
+            echo "ERROR: no se encontró ningún catálogo persistente compatible."
+            exit 1
+          fi
+
+          echo "BD restaurada: $(du -h data/iptv_manager.db | cut -f1)"
+          rm -rf candidates
+
+      - name: Validate UI against real catalog
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          DATABASE_PATH: data/iptv_manager.db
+        run: python scripts/test_ui_real.py
