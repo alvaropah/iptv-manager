@@ -1,5 +1,5 @@
-name: 09 - Metadata & Matching v0.6.7
-run-name: Metadata & Matching v0.6.7
+name: 09 - Metadata & Matching v0.6.8
+run-name: Metadata & Matching v0.6.8
 
 on:
   workflow_dispatch:
@@ -46,13 +46,15 @@ jobs:
           done
           test -s data/iptv_manager.db
           echo "BD restaurada: $(du -h data/iptv_manager.db | cut -f1)"
-      - name: Pruebas deterministas v0.6.7
+      - name: Pruebas deterministas v0.6.8
         run: python scripts/test_v067_matching.py
-      - name: Validar arquitectura v0.6.7
+      - name: Validar arquitectura v0.6.8
         run: python scripts/test_v06_metadata.py
-      - name: Enriquecimiento TMDB v0.6.7 — muestra ampliada
+      - name: Migrar metadata_links v0.6.8
+        run: python scripts/migrate_v068_metadata_links.py
+      - name: Enriquecimiento TMDB v0.6.8 — muestra ampliada
         if: ${{ env.TMDB_API_TOKEN != '' }}
         run: python scripts/enrich_tmdb.py --limit ${{ inputs.limit }}
-      - name: Validar resultados TMDB v0.6.7
+      - name: Validar resultados TMDB v0.6.8
         if: ${{ env.TMDB_API_TOKEN != '' }}
         run: python scripts/test_tmdb_enrichment.py
