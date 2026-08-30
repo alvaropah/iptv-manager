@@ -4,7 +4,14 @@ import argparse
 import json
 import os
 import sqlite3
+import sys
 import time
+from pathlib import Path
+
+# Permite ejecutar `python scripts/enrich_tmdb.py` desde la raíz del repo.
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from app.core.config import settings
 from app.core.tmdb import TMDBClient
