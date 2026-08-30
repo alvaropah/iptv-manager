@@ -6,6 +6,8 @@ import os
 import sys
 from pathlib import Path
 
+import requests
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -23,6 +25,9 @@ def save_episode_metadata(conn, row, result):
     still_path = result.get("still_path")
     still_url = f"https://image.tmdb.org/t/p/w780{still_path}" if still_path else None
 
+    # Replace the episode's TMDB metadata atomically. This makes reruns safe and
+    # avoids stale links when an episode was previously matched to another ID.
+    conn.execute("DELETE FROM metadata_links WHERE episode_id=? AND external_source='tmdb'", (row["episode_id"],))
     conn.execute(
         """INSERT INTO episode_metadata
         (episode_id,source,external_id,title,overview,air_date,runtime,still_url,raw_json,language,updated_at)
@@ -38,7 +43,9 @@ def save_episode_metadata(conn, row, result):
          json.dumps(result, ensure_ascii=False), settings.tmdb_language),
     )
 
-    conn.execute("DELETE FROM metadata_links WHERE episode_id=? AND external_source='tmdb'", (row["episode_id"],))
+    # external_id is globally unique per source in metadata_links. If TMDB has
+    # already assigned this ID to another provider episode, move the link to the
+    # current episode instead of failing the whole batch.
     conn.execute(
         """INSERT INTO metadata_links
         (episode_id,provider_title,external_source,external_id,match_status,match_score,matched_by,updated_at)
@@ -57,14 +64,7 @@ def save_episode_metadata(conn, row, result):
 
 
 def resolve_series_tmdb_id(conn, client: TMDBClient, series_id: int, cache: dict[int, str | None]) -> tuple[str | None, bool]:
-    """Return (TMDB series id, newly_resolved).
-
-    The persistent catalog is deliberately independent from the metadata workflow.
-    Therefore episode enrichment cannot require content_metadata to already exist.
-    If the series has no TMDB identity yet, reuse the same v0.6.9 matching engine
-    used by the movie/series metadata workflow and persist the result before looking
-    up any episode.
-    """
+    """Return (TMDB series id, newly_resolved)."""
     if series_id in cache:
         return cache[series_id], False
 
@@ -127,6 +127,12 @@ def resolve_series_tmdb_id(conn, client: TMDBClient, series_id: int, cache: dict
     return tmdb_id, True
 
 
+def _http_status(exc: Exception) -> int | None:
+    if isinstance(exc, requests.HTTPError) and exc.response is not None:
+        return exc.response.status_code
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser(description="Enriquece episodios con metadata de TMDB")
     parser.add_argument("--limit", type=int, default=200)
@@ -174,14 +180,34 @@ def main():
                     print(f"[{index}/{len(rows)}] PENDING | {row['provider_title']} | serie_id={row['series_id']} | sin TMDB series", flush=True)
                     continue
 
-                result = client.episode(int(tmdb_series_id), int(row["season_number"]), int(row["episode_number"]))
+                try:
+                    result = client.episode(int(tmdb_series_id), int(row["season_number"]), int(row["episode_number"]))
+                except requests.HTTPError as exc:
+                    status = _http_status(exc)
+                    if status == 404:
+                        pending += 1
+                        print(
+                            f"[{index}/{len(rows)}] PENDING | {row['provider_title']} | "
+                            f"TMDB episode inexistente S{row['season_number']:02d}E{row['episode_number']:02d} | "
+                            f"tmdb_series={tmdb_series_id}",
+                            flush=True,
+                        )
+                        conn.rollback()
+                        continue
+                    raise
+
                 save_episode_metadata(conn, row, result)
                 conn.commit()
                 matched += 1
                 print(f"[{index}/{len(rows)}] MATCHED | {row['provider_title']} -> {result.get('name') or '?'} | S{row['season_number']:02d}E{row['episode_number']:02d} | tmdb_series={tmdb_series_id}", flush=True)
             except Exception as exc:
+                # Never leave a failed write transaction open: one bad episode
+                # must not poison subsequent rows in the same 200-item batch.
+                conn.rollback()
                 errors += 1
-                print(f"[{index}/{len(rows)}] ERROR | episode={row['episode_id']} | {exc}", flush=True)
+                status = _http_status(exc)
+                detail = f"HTTP {status}" if status else f"{type(exc).__name__}: {exc}"
+                print(f"[{index}/{len(rows)}] ERROR | episode={row['episode_id']} | {detail}", flush=True)
 
         print(f"RESUMEN | matched={matched} errors={errors} pending={pending} series_resolved={series_resolved} series_unresolved={series_unresolved}", flush=True)
 
