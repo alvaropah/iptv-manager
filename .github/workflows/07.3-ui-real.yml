@@ -1,0 +1,30 @@
+name: 07.3 - UI sobre catálogo real v0.4.3
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ui-real:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore persisted catalog
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow: 07.1-api-real.yml
+          name: iptv-manager-v031-catalog
+          path: data
+          search_artifacts: true
+          workflow_conclusion: success
+          if_no_artifact_found: fail
+
+      - name: Validate UI against real catalog
+        run: python scripts/test_ui_real.py
