@@ -70,9 +70,10 @@ jobs:
       - name: Preflight episodios pendientes
         env:
           DATABASE_PATH: data/iptv_manager.db
+          INPUT_LIMIT: ${{ inputs.limit }}
         run: |
           python - <<'PY'
-          import sqlite3, os, sys
+          import sqlite3, os
           db=os.environ['DATABASE_PATH']
           limit=int(os.environ.get('INPUT_LIMIT', '200'))
           with sqlite3.connect(db) as con:
@@ -88,11 +89,7 @@ jobs:
           print(f'PREFLIGHT | active_episodes={active} | pending_episodes={pending} | batch_limit={limit}')
           if active > 0 and pending == 0:
               print('No hay episodios pendientes: el enriquecimiento ya está completo.')
-          elif active > 0 and pending < 1:
-              sys.exit(1)
           PY
-        env:
-          INPUT_LIMIT: ${{ inputs.limit }}
 
       - name: Enrich TMDB episodes
         env:
