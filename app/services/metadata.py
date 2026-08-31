@@ -7,7 +7,9 @@ from difflib import SequenceMatcher
 TECH_RE = re.compile(r"\b(?:4k|2160p|1080p|720p|4320p|hdr10\+?|dolby.?vision|dolby.?audio|dolby.?atmos|dual.?audio|multi.?subs?|espanol|castellano|latino|vose|web.?dl|web.?rip|bluray|blu.?ray|hdtv|remux|hevc|x264|x265|h264|h265|aac|ac3|dts|uhd|fhd|sd)\b", re.I)
 YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2})\b")
 COUNTRY_SUFFIX_RE = re.compile(r"\s*\(([A-Z]{2})\)\s*$", re.I)
+LANG_COUNTRY_RE = re.compile(r"\s*\(([A-Z]{2})(?:-[A-Z]{2})?\)\s*$", re.I)
 PROVIDER_PREFIX_RE = re.compile(r"^(?:(?:4k|8k|uhd|fhd|hd)\s*[-_:|]\s*)?(?:amz|amazon|nf|netflix|disney\+?|disney|apple\+?|apple|hbo|max|paramount\+?|sky|osn\+?|peacock|showtime|prime\+?|prime|crunchyroll|discovery\+?|discovery|vix(?:\s+premium)?|movistar|atresplayer|rtve|starz|hulu|viaplay|filmin|rakuten|nickelodeon|marvel)\s*[-_:|]\s*", re.I)
+LOCALE_PREFIX_RE = re.compile(r"^(?:es|en|fr|de|it|pt|ca|eu|gl)\s*[-_:|]\s*", re.I)
 INSTALLMENT_RE = re.compile(r"\b(?:vol(?:ume)?\.?\s*\d+|part\s*\d+|pt\.?\s*\d+|chapter\s*\d+|special\s*\d+|season\s*\d+|series\s*\d+)\b", re.I)
 EPISODE_MARKER_RE = re.compile(r"(?:^|\s)[-–—|_: ]*S\d{1,3}E\d{1,4}(?:\s.*)?$", re.I)
 
@@ -29,6 +31,7 @@ def clean_provider_title(value: str) -> str:
     while value and value != previous:
         previous = value
         value = PROVIDER_PREFIX_RE.sub("", value).strip()
+    value = LOCALE_PREFIX_RE.sub("", value).strip()
     value = TECH_RE.sub(" ", value)
     value = re.sub(r"\[[^\]]*\]", " ", value)
     value = re.sub(r"[._]+", " ", value)
@@ -51,7 +54,7 @@ def extract_country(title: str) -> str | None:
 def _clean_search_title(value: str) -> str:
     value = clean_provider_title(value)
     value = EPISODE_MARKER_RE.sub(" ", value)
-    value = COUNTRY_SUFFIX_RE.sub("", value).strip()
+    value = LANG_COUNTRY_RE.sub("", value).strip()
     value = YEAR_RE.sub(" ", value)
     value = re.sub(r"\(\s*\)|\[\s*\]", " ", value)
     return re.sub(r"\s+", " ", value).strip(" -_:|()[]")
@@ -154,8 +157,6 @@ def score_candidate(provider_title: str, provider_year: int | None, candidate: d
         if candidate_year == provider_year:
             best = min(1.0, best + 0.18)
         elif exact_clean_title:
-            # An exact title with a conflicting explicit year is ambiguous, not a
-            # safe automatic match. Keep it below the matched threshold.
             best = min(best, 0.78)
         elif best < 0.90:
             best = max(0.0, best - 0.10)
@@ -163,6 +164,8 @@ def score_candidate(provider_title: str, provider_year: int | None, candidate: d
         countries = _candidate_countries(candidate)
         if provider_country.upper() in countries:
             best = min(1.0, best + 0.04)
+        elif countries and best >= 0.90:
+            best = min(best, 0.92)
     return round(best, 4)
 
 
@@ -172,3 +175,28 @@ def classify_match(score: float) -> str:
     if score >= 0.62:
         return "review"
     return "rejected"
+
+
+def explain_match(provider_title: str, provider_year: int | None, candidate: dict, provider_country: str | None = None) -> list[str]:
+    """Return concise, deterministic evidence used by the scorer."""
+    reasons: list[str] = []
+    clean = _clean_search_title(provider_title)
+    names = _candidate_names(candidate)
+    normalized = [normalize_title(x) for x in names]
+    clean_norm = normalize_title(clean)
+    if clean_norm and any(name == clean_norm for name in normalized):
+        reasons.append("exact_title")
+    else:
+        reasons.append("title_similarity")
+    date = (candidate.get("release_date") or candidate.get("first_air_date") or "")[:4]
+    if provider_year and date.isdigit():
+        reasons.append("year_match" if int(date) == provider_year else "year_conflict")
+    if provider_country:
+        countries = _candidate_countries(candidate)
+        if provider_country.upper() in countries:
+            reasons.append("country_match")
+        elif countries:
+            reasons.append("country_conflict")
+    if any(_marker_conflict(provider_title, name) for name in names):
+        reasons.append("installment_conflict")
+    return reasons
