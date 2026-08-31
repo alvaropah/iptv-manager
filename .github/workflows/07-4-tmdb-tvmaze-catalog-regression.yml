@@ -134,7 +134,7 @@ jobs:
           with sqlite3.connect(db) as con:
               integrity=con.execute('PRAGMA integrity_check').fetchone()[0]
               links=con.execute("SELECT external_source, match_status, COUNT(*) FROM metadata_links GROUP BY external_source, match_status ORDER BY external_source, match_status").fetchall()
-              episode_sources=con.execute("SELECT source, COUNT(*) FROM episodes WHERE source IS NOT NULL GROUP BY source ORDER BY source").fetchall()
+              episode_sources=con.execute("SELECT source, COUNT(*) FROM episode_metadata WHERE source IS NOT NULL GROUP BY source ORDER BY source").fetchall()
           print(f'FINAL | sqlite_integrity={integrity}')
           print(f'FINAL | metadata_links={links}')
           print(f'FINAL | episode_sources={episode_sources}')
