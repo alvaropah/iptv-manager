@@ -18,7 +18,7 @@ def test_tvmaze_fallback_is_used_when_primary_and_alternate_tmdb_fail():
 
     tvmaze = Mock()
     tvmaze.search_shows.return_value = [
-        {"show": {"id": 9765, "name": "The Simpsons", "premiered": "1989-12-17"}}
+        {"show": {"id": 54321, "name": "The Simpsons", "premiered": "1989-12-17"}}
     ]
     tvmaze.episode.return_value = {
         "id": 123456,
@@ -45,4 +45,4 @@ def test_tvmaze_fallback_is_used_when_primary_and_alternate_tmdb_fail():
     assert result["id"] == 123456
     assert result["name"] == "Pilot"
     assert matched_by.startswith("tvmaze+season_number+episode_number+")
-    tvmaze.episode.assert_called_once_with(9765, 1, 1)
+    tvmaze.episode.assert_called_once_with(54321, 1, 1)
