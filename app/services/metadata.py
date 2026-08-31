@@ -7,7 +7,7 @@ from difflib import SequenceMatcher
 TECH_RE = re.compile(r"\b(?:4k|2160p|1080p|720p|4320p|hdr10\+?|dolby.?vision|dolby.?audio|dolby.?atmos|dual.?audio|multi.?subs?|espanol|castellano|latino|vose|web.?dl|web.?rip|bluray|blu.?ray|hdtv|remux|hevc|x264|x265|h264|h265|aac|ac3|dts|uhd|fhd|sd)\b", re.I)
 YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2})\b")
 COUNTRY_SUFFIX_RE = re.compile(r"\s*\(([A-Z]{2})\)\s*$", re.I)
-PROVIDER_PREFIX_RE = re.compile(r"^(?:4k|8k|uhd|fhd|hd|amz|amazon|netflix|disney\+?|disney|apple\+?|apple|hbo|max|paramount\+?|sky|osn\+?|peacock|showtime|prime\+?|prime|crunchyroll|discovery\+?|discovery|vix(?:\s+premium)?|movistar|atresplayer|rtve|starz|hulu|viaplay|filmin|rakuten|nickelodeon|marvel)\s*[-_:|]\s*", re.I)
+PROVIDER_PREFIX_RE = re.compile(r"^(?:(?:4k|8k|uhd|fhd|hd)\s*[-_:|]\s*)?(?:amz|amazon|nf|netflix|disney\+?|disney|apple\+?|apple|hbo|max|paramount\+?|sky|osn\+?|peacock|showtime|prime\+?|prime|crunchyroll|discovery\+?|discovery|vix(?:\s+premium)?|movistar|atresplayer|rtve|starz|hulu|viaplay|filmin|rakuten|nickelodeon|marvel)\s*[-_:|]\s*", re.I)
 INSTALLMENT_RE = re.compile(r"\b(?:vol(?:ume)?\.?\s*\d+|part\s*\d+|pt\.?\s*\d+|chapter\s*\d+|special\s*\d+|season\s*\d+|series\s*\d+)\b", re.I)
 EPISODE_MARKER_RE = re.compile(r"(?:^|\s)[-–—|_: ]*S\d{1,3}E\d{1,4}(?:\s.*)?$", re.I)
 
@@ -50,14 +50,11 @@ def extract_country(title: str) -> str | None:
 
 def _clean_search_title(value: str) -> str:
     value = clean_provider_title(value)
-    # Episode records often contain the series title plus SxxExx and an
-    # episode title. Those markers must never leak into a series lookup.
     value = EPISODE_MARKER_RE.sub(" ", value)
     value = COUNTRY_SUFFIX_RE.sub("", value).strip()
     value = YEAR_RE.sub(" ", value)
     value = re.sub(r"\(\s*\)|\[\s*\]", " ", value)
-    value = re.sub(r"\s+", " ", value).strip(" -_:|()[]")
-    return value
+    return re.sub(r"\s+", " ", value).strip(" -_:|()[]")
 
 
 def title_queries(provider_title: str, year: int | None = None, original_title: str | None = None) -> list[str]:
@@ -111,9 +108,7 @@ def _installment_signature(value: str) -> tuple[tuple[str, str], ...]:
 def _marker_conflict(provider: str, candidate: str) -> bool:
     p = _installment_signature(provider)
     c = _installment_signature(candidate)
-    if not p or not c:
-        return False
-    return p != c
+    return bool(p and c and p != c)
 
 
 def _candidate_countries(candidate: dict) -> set[str]:
@@ -130,7 +125,6 @@ def _candidate_countries(candidate: dict) -> set[str]:
 
 
 def _title_head_match(provider: str, candidate: str) -> bool:
-    """True when the provider title is the complete title head of a longer TMDB title."""
     if not provider or not candidate:
         return False
     provider_tokens = provider.split()
@@ -156,9 +150,14 @@ def score_candidate(provider_title: str, provider_year: int | None, candidate: d
         best = min(best, 0.35)
     date = (candidate.get("release_date") or candidate.get("first_air_date") or "")[:4]
     if provider_year and date.isdigit():
-        if int(date) == provider_year:
+        candidate_year = int(date)
+        if candidate_year == provider_year:
             best = min(1.0, best + 0.18)
-        elif not exact_clean_title and best < 0.90:
+        elif exact_clean_title:
+            # An exact title with a conflicting explicit year is ambiguous, not a
+            # safe automatic match. Keep it below the matched threshold.
+            best = min(best, 0.78)
+        elif best < 0.90:
             best = max(0.0, best - 0.10)
     if provider_country:
         countries = _candidate_countries(candidate)
