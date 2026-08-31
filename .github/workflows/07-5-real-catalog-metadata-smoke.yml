@@ -1,6 +1,15 @@
 name: 07-5 - Real Catalog Metadata Smoke Test
 
 on:
+  push:
+    paths:
+      - 'scripts/enrich_tmdb.py'
+      - 'scripts/enrich_tmdb_episodes.py'
+      - 'app/services/metadata.py'
+      - 'app/core/tmdb.py'
+      - 'app/core/tvmaze.py'
+      - 'tests/**'
+      - '.github/workflows/07-5-real-catalog-metadata-smoke.yml'
   workflow_dispatch:
     inputs:
       series_limit:
@@ -83,9 +92,8 @@ jobs:
           DATABASE_PATH: data/iptv_manager.db
         run: |
           set -euo pipefail
-          args="--type series --limit ${{ inputs.series_limit }} --diagnostic"
-          if [ "${{ inputs.diagnostic }}" != "true" ]; then args="--type series --limit ${{ inputs.series_limit }}"; fi
-          python scripts/enrich_tmdb.py $args
+          LIMIT='${{ inputs.series_limit || '25' }}'
+          python scripts/enrich_tmdb.py --type series --limit "$LIMIT" --diagnostic
 
       - name: Smoke test movie resolver
         env:
@@ -94,9 +102,8 @@ jobs:
           DATABASE_PATH: data/iptv_manager.db
         run: |
           set -euo pipefail
-          args="--type movie --limit ${{ inputs.movie_limit }} --diagnostic"
-          if [ "${{ inputs.diagnostic }}" != "true" ]; then args="--type movie --limit ${{ inputs.movie_limit }}"; fi
-          python scripts/enrich_tmdb.py $args
+          LIMIT='${{ inputs.movie_limit || '25' }}'
+          python scripts/enrich_tmdb.py --type movie --limit "$LIMIT" --diagnostic
 
       - name: Smoke test episode fallback
         env:
