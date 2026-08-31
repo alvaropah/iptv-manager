@@ -70,16 +70,39 @@ jobs:
           if integrity!='ok' or missing: sys.exit(1)
           PY
           }
-          for workflow_artifact in iptv-manager-v070-enriched iptv-manager-v031-catalog iptv-manager-v03-catalog; do
-            for run in $(gh run list --status success --limit 10 --json databaseId --jq '.[].databaseId'); do
+
+          restore_from_workflow() {
+            local workflow="$1"
+            local artifact="$2"
+            echo "Buscando artifact '$artifact' en workflow '$workflow'..."
+            for run in $(gh run list --workflow "$workflow" --status success --limit 20 --json databaseId --jq '.[].databaseId'); do
               rm -rf candidates/*
-              if gh run download "$run" --name "$workflow_artifact" --dir candidates >/dev/null 2>&1; then
+              echo "  Probando run=$run"
+              if gh run download "$run" --name "$artifact" --dir candidates >/dev/null 2>&1; then
                 db=$(find candidates -type f \( -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \) -print -quit || true)
-                if [ -n "$db" ] && validate "$db"; then cp "$db" data/iptv_manager.db; found=1; break 2; fi
+                if [ -n "$db" ] && validate "$db"; then
+                  cp "$db" data/iptv_manager.db
+                  echo "  OK | workflow=$workflow | run=$run | artifact=$artifact"
+                  return 0
+                fi
               fi
             done
-          done
-          test "$found" -eq 1
+            return 1
+          }
+
+          if restore_from_workflow 07-tmdb-episodes.yml iptv-manager-v070-enriched; then
+            found=1
+          elif restore_from_workflow 03-1-sync-persistent.yml iptv-manager-v031-catalog; then
+            found=1
+          elif restore_from_workflow 06-sync-catalog-v03.yml iptv-manager-v03-catalog; then
+            found=1
+          fi
+
+          if [ "$found" -ne 1 ]; then
+            echo 'ERROR: no se encontró una BD persistente válida en los workflows esperados.'
+            echo 'Se han consultado específicamente los runs exitosos de cada workflow; no se mezclan runs de workflows distintos.'
+            exit 1
+          fi
           echo "DB restored: $(du -h data/iptv_manager.db | cut -f1)"
 
       - name: Run automated tests
