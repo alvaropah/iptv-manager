@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import settings
 from app.db.database import init_db, connect
 from app.db.metadata import init_metadata_db
-from app.db.repository import get_categories,get_content,get_episode,get_series_seasons,get_stats,list_catalog,search_catalog
+from app.db.repository import get_categories,get_content,get_episode,get_recent_catalog,get_series_seasons,get_stats,list_catalog,search_catalog
 
 APP_VERSION="0.7.0"
 app=FastAPI(title="IPTV Manager API",version=APP_VERSION,description="Biblioteca IPTV con catálogo unificado y metadatos TMDB persistentes.")
@@ -24,6 +24,9 @@ def health(): return {"status":"healthy","version":APP_VERSION,"metadata":"tmdb-
 def stats(): return get_stats()
 @app.get("/api/categories")
 def categories(content_type:str|None=Query(None,pattern="^(movie|series|live)$"),selected_only:bool=True): return get_categories(content_type,selected_only)
+@app.get("/api/recent")
+def recent(content_type:str|None=Query(None,pattern="^(movie|series)$"),limit:int=Query(20,ge=1,le=100)):
+    return {"items":get_recent_catalog(content_type,limit),"limit":limit,"content_type":content_type}
 @app.get("/api/catalog/{content_type}")
 def catalog(content_type:str,page:int=Query(1,ge=1),page_size:int=Query(40,ge=1,le=100),category_id:int|None=Query(None,ge=1),q:str|None=Query(None,min_length=2)):
     if content_type not in {"movie","series"}: raise HTTPException(400,"Tipo de contenido no válido")
