@@ -1,0 +1,77 @@
+name: 07-4 - TVmaze Live Source Probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      query:
+        description: 'TVmaze show query'
+        required: true
+        default: 'Arpo'
+        type: string
+      seasons:
+        description: 'Seasons to probe, comma-separated'
+        required: true
+        default: '1,2,3'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Probe TVmaze live API
+        env:
+          TVMAZE_QUERY: ${{ inputs.query }}
+          TVMAZE_SEASONS: ${{ inputs.seasons }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          from app.core.tvmaze import TVMazeClient
+          from scripts.enrich_tmdb_episodes import _title_score
+
+          query = os.environ['TVMAZE_QUERY']
+          seasons = [int(x.strip()) for x in os.environ['TVMAZE_SEASONS'].split(',') if x.strip()]
+          client = TVMazeClient()
+          candidates = client.search_shows(query)
+          print(f'TVMAZE SEARCH | query={query} | candidates={len(candidates)}')
+          ranked = []
+          for item in candidates:
+              show = item.get('show') or {}
+              name = show.get('name') or ''
+              score = _title_score(query, name)
+              ranked.append((score, int(show['id']), name, show.get('premiered')))
+          for score, show_id, name, premiered in sorted(ranked, reverse=True)[:10]:
+              print(f'CANDIDATE | id={show_id} | score={score:.2f} | premiered={premiered or "?"} | title={name}')
+          if not ranked:
+              raise SystemExit('No TVmaze candidates found')
+
+          best = max(ranked)
+          print(f'SELECTED | id={best[1]} | score={best[0]:.2f} | title={best[2]}')
+          for season in seasons:
+              found = 0
+              for episode in range(1, 100):
+                  try:
+                      result = client.episode(best[1], season, episode)
+                  except Exception as exc:
+                      if getattr(getattr(exc, 'response', None), 'status_code', None) == 404:
+                          break
+                      raise
+                  found += 1
+                  print(f'EPISODE | S{season:02d}E{episode:02d} | id={result.get("id")} | title={result.get("name")}')
+              print(f'SEASON SUMMARY | S{season:02d} | episodes_found={found}')
+          PY
