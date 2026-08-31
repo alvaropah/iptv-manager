@@ -57,17 +57,33 @@ jobs:
           rm -rf data candidates
           mkdir -p data candidates
           found=0
+
           validate() {
             DB="$1" python - <<'PY'
-          import os, sqlite3, sys
-          db=os.environ['DB']
-          required={'providers','categories','content','seasons','episodes','versions','streams','series_sources'}
+          import os
+          import sqlite3
+          import sys
+
+          db = os.environ['DB']
+          required = {
+              'providers', 'categories', 'content', 'seasons',
+              'episodes', 'versions', 'streams', 'series_sources'
+          }
+
           with sqlite3.connect(db) as con:
-              integrity=con.execute('PRAGMA integrity_check').fetchone()[0]
-              tables={r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-          missing=required-tables
+              integrity = con.execute('PRAGMA integrity_check').fetchone()[0]
+              tables = {
+                  row[0]
+                  for row in con.execute(
+                      "SELECT name FROM sqlite_master WHERE type='table'"
+                  )
+              }
+
+          missing = required - tables
           print(f'integrity_check={integrity}; missing={sorted(missing)}')
-          if integrity!='ok' or missing: sys.exit(1)
+
+          if integrity != 'ok' or missing:
+              sys.exit(1)
           PY
           }
 
@@ -75,11 +91,25 @@ jobs:
             local workflow="$1"
             local artifact="$2"
             echo "Buscando artifact '$artifact' en workflow '$workflow'..."
-            for run in $(gh run list --workflow "$workflow" --status success --limit 20 --json databaseId --jq '.[].databaseId'); do
+
+            for run in $(gh run list \
+              --workflow "$workflow" \
+              --status success \
+              --limit 20 \
+              --json databaseId \
+              --jq '.[].databaseId'); do
+
               rm -rf candidates/*
               echo "  Probando run=$run"
-              if gh run download "$run" --name "$artifact" --dir candidates >/dev/null 2>&1; then
-                db=$(find candidates -type f \( -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \) -print -quit || true)
+
+              if gh run download "$run" \
+                --name "$artifact" \
+                --dir candidates >/dev/null 2>&1; then
+
+                db=$(find candidates -type f \
+                  \( -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \) \
+                  -print -quit || true)
+
                 if [ -n "$db" ] && validate "$db"; then
                   cp "$db" data/iptv_manager.db
                   echo "  OK | workflow=$workflow | run=$run | artifact=$artifact"
@@ -87,6 +117,7 @@ jobs:
                 fi
               fi
             done
+
             return 1
           }
 
@@ -103,6 +134,7 @@ jobs:
             echo 'Se han consultado específicamente los runs exitosos de cada workflow; no se mezclan runs de workflows distintos.'
             exit 1
           fi
+
           echo "DB restored: $(du -h data/iptv_manager.db | cut -f1)"
 
       - name: Run automated tests
