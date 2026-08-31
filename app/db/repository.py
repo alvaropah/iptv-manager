@@ -49,6 +49,15 @@ def list_catalog(content_type,page=1,page_size=40,category_id=None,q=None):
         rows=conn.execute(f"SELECT {_catalog_select()} FROM content c LEFT JOIN content_metadata m ON m.content_id=c.id WHERE {where} ORDER BY c.normalized_title,year DESC,c.id LIMIT ? OFFSET ?",[*params,page_size,offset]).fetchall()
     return {"items":[dict(r) for r in rows],**_page(page,page_size,total)}
 
+def get_recent_catalog(content_type=None,limit=20):
+    """Return recently discovered active content, preserving provider discovery order."""
+    clauses=["c.is_active=1"]; params=[]
+    if content_type: clauses.append("c.content_type=?"); params.append(content_type)
+    where=" AND ".join(clauses)
+    with connect() as conn:
+        rows=conn.execute(f"SELECT {_catalog_select()},c.first_seen_at,c.last_seen_at FROM content c LEFT JOIN content_metadata m ON m.content_id=c.id WHERE {where} ORDER BY CASE WHEN c.first_seen_at IS NULL THEN 1 ELSE 0 END,c.first_seen_at DESC,c.id DESC LIMIT ?",[*params,limit]).fetchall()
+    return [dict(r) for r in rows]
+
 def search_catalog(query,limit=50,content_type=None,page=1,page_size=None):
     q=f"%{_normalize_search(query)}%"; clauses=["c.is_active=1","c.normalized_title LIKE ?"]; params=[q]
     if content_type: clauses.append("c.content_type=?"); params.append(content_type)
